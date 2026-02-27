@@ -22,6 +22,7 @@ export interface GameEvent {
   sportId?: number
   confidence?: VisitConfidence
   confidenceNote?: string // e.g. "Typical home game day" or "May be traveling for away series"
+  sourceUrl?: string // Link to verify this game (MLB Gameday, D1Baseball schedule, etc.)
 }
 
 export interface TripCandidate {
@@ -49,6 +50,7 @@ export interface FlyInVisit {
   estimatedTravelHours: number // flight + airport overhead
   source: ScheduleSource
   isHome: boolean
+  sourceUrl?: string
 }
 
 export interface TripPlan {

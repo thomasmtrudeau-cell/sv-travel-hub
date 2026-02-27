@@ -106,13 +106,24 @@ export default function ScheduleCalendar({ games }: Props) {
               </span>
               {dayGames.length > 0 && (
                 <div className="mt-0.5 flex flex-wrap gap-0.5">
-                  {dayGames.slice(0, 3).map((g) => (
-                    <div
-                      key={g.id}
-                      className="h-2 w-2 rounded-full bg-accent-blue"
-                      title={`${g.homeTeam} vs ${g.awayTeam} @ ${g.venue.name}`}
-                    />
-                  ))}
+                  {dayGames.slice(0, 3).map((g) =>
+                    g.sourceUrl ? (
+                      <a
+                        key={g.id}
+                        href={g.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="h-2 w-2 rounded-full bg-accent-blue hover:bg-accent-blue/70 cursor-pointer"
+                        title={`${g.homeTeam} vs ${g.awayTeam} @ ${g.venue.name} — click to verify`}
+                      />
+                    ) : (
+                      <div
+                        key={g.id}
+                        className="h-2 w-2 rounded-full bg-accent-blue"
+                        title={`${g.homeTeam} vs ${g.awayTeam} @ ${g.venue.name}`}
+                      />
+                    ),
+                  )}
                   {dayGames.length > 3 && (
                     <span className="text-[9px] text-text-dim">+{dayGames.length - 3}</span>
                   )}

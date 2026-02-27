@@ -280,6 +280,17 @@ export default function TripPlanner() {
                               ? (visit.isHome ? 'Home Game' : 'Away Game')
                               : 'School Visit (est.)'}
                           </span>
+                          {visit.sourceUrl && (
+                            <a
+                              href={visit.sourceUrl}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="rounded px-1.5 py-0.5 text-[10px] font-medium text-text-dim hover:text-purple-400 transition-colors"
+                              title="Verify this game on the source schedule"
+                            >
+                              Verify &nearr;
+                            </a>
+                          )}
                         </div>
                         <div className="mt-1.5 flex flex-wrap gap-1">
                           {visit.playerNames.map((name) => (

@@ -52,6 +52,7 @@ interface VenueStop {
   source: ScheduleSource
   isHome: boolean
   awayTeam: string
+  sourceUrl?: string
 }
 
 function buildVenueStops(trip: TripCandidate): VenueStop[] {
@@ -71,6 +72,7 @@ function buildVenueStops(trip: TripCandidate): VenueStop[] {
     source: trip.anchorGame.source,
     isHome: trip.anchorGame.isHome,
     awayTeam: trip.anchorGame.awayTeam,
+    sourceUrl: trip.anchorGame.sourceUrl,
   })
 
   // Merge nearby games by venue
@@ -95,6 +97,7 @@ function buildVenueStops(trip: TripCandidate): VenueStop[] {
         source: game.source,
         isHome: game.isHome,
         awayTeam: game.awayTeam,
+        sourceUrl: game.sourceUrl,
       })
     }
   }
@@ -204,6 +207,17 @@ export default function TripCard({ trip, index }: Props) {
                       <span className="rounded bg-accent-blue/20 px-1.5 py-0.5 text-[10px] font-medium text-accent-blue">
                         BASE
                       </span>
+                    )}
+                    {stop.sourceUrl && (
+                      <a
+                        href={stop.sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="rounded px-1.5 py-0.5 text-[10px] font-medium text-text-dim hover:text-accent-blue transition-colors"
+                        title="Verify this game on the source schedule"
+                      >
+                        Verify &nearr;
+                      </a>
                     )}
                   </div>
 

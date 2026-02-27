@@ -5,6 +5,7 @@ import { TIER_VISIT_TARGETS } from '../types/roster'
 import { isSpringTraining, getSpringTrainingSite } from '../data/springTraining'
 import { resolveMLBTeamId, resolveNcaaName } from '../data/aliases'
 import { NCAA_VENUES } from '../data/ncaaVenues'
+import { D1_BASEBALL_SLUGS } from '../data/d1baseballSlugs'
 
 // Constants
 const HOME_BASE: Coordinates = { lat: 28.5383, lng: -81.3792 } // Orlando, FL
@@ -149,6 +150,7 @@ export function generateSpringTrainingEvents(
         venue: { name: site.venueName, coords: site.coords },
         source: 'mlb-api',
         playerNames,
+        sourceUrl: 'https://www.mlb.com/spring-training/schedule',
       })
     }
   }
@@ -225,6 +227,12 @@ export function generateNcaaEvents(
         confidenceNote = 'Non-game day — player assumed at campus but may be away'
       }
 
+      // Link to D1Baseball schedule if slug exists, otherwise generic
+      const slug = D1_BASEBALL_SLUGS[school]
+      const sourceUrl = slug
+        ? `https://d1baseball.com/team/${slug}/schedule/`
+        : undefined
+
       events.push({
         id: `ncaa-${school.toLowerCase().replace(/\s+/g, '-')}-${date}`,
         date,
@@ -238,6 +246,7 @@ export function generateNcaaEvents(
         playerNames,
         confidence,
         confidenceNote,
+        sourceUrl,
       })
     }
   }
@@ -625,6 +634,7 @@ export async function generateTrips(
     source: GameEvent['source']
     isHome: boolean
     distanceKm: number
+    sourceUrl?: string
   }>()
 
   for (const game of eligibleGames) {
@@ -646,6 +656,7 @@ export async function generateTrips(
         source: game.source,
         isHome: game.isHome,
         distanceKm: distKm,
+        sourceUrl: game.sourceUrl,
       })
     }
   }
@@ -664,6 +675,7 @@ export async function generateTrips(
       estimatedTravelHours: estimateFlightHours(entry.distanceKm),
       source: entry.source,
       isHome: entry.isHome,
+      sourceUrl: entry.sourceUrl,
     })
 
     for (const name of entry.players) flyInCovered.add(name)

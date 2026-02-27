@@ -54,11 +54,23 @@ export const useTripStore = create<TripState>((set, get) => ({
   generateTrips: async () => {
     const { startDate, endDate, maxDriveMinutes, priorityPlayers } = get()
     const players = useRosterStore.getState().players
-    const scheduledGames = useScheduleStore.getState().proGames
+    const scheduleState = useScheduleStore.getState()
+    const scheduledGames = scheduleState.proGames
+    const realNcaaGames = scheduleState.ncaaGames
 
     // Merge scheduled games with spring training + NCAA + HS visit opportunities
     const stEvents = generateSpringTrainingEvents(players, startDate, endDate)
-    const ncaaEvents = generateNcaaEvents(players, startDate, endDate)
+
+    // Use real D1Baseball NCAA schedules if available, otherwise fall back to synthetic
+    const ncaaPlayersWithRealSchedules = new Set(
+      realNcaaGames.flatMap((g) => g.playerNames),
+    )
+    const ncaaSyntheticEvents = generateNcaaEvents(
+      // Only generate synthetic events for NCAA players WITHOUT real schedules
+      players.filter((p) => p.level === 'NCAA' && !ncaaPlayersWithRealSchedules.has(p.playerName)),
+      startDate,
+      endDate,
+    )
 
     // Build HS venue lookup from venue store
     const venueState = useVenueStore.getState().venues
@@ -71,7 +83,7 @@ export const useTripStore = create<TripState>((set, get) => ({
     }
     const hsEvents = generateHsEvents(players, startDate, endDate, hsVenues)
 
-    const allGames = [...scheduledGames, ...stEvents, ...ncaaEvents, ...hsEvents]
+    const allGames = [...scheduledGames, ...stEvents, ...realNcaaGames, ...ncaaSyntheticEvents, ...hsEvents]
 
     set({ computing: true, tripPlan: null, progressStep: 'Starting...', progressDetail: '' })
 

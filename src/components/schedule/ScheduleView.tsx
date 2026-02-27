@@ -25,6 +25,11 @@ export default function ScheduleView() {
   const fetchAffiliates = useScheduleStore((s) => s.fetchAffiliates)
   const assignPlayerToTeam = useScheduleStore((s) => s.assignPlayerToTeam)
   const fetchProSchedules = useScheduleStore((s) => s.fetchProSchedules)
+  const ncaaGames = useScheduleStore((s) => s.ncaaGames)
+  const ncaaLoading = useScheduleStore((s) => s.ncaaLoading)
+  const ncaaProgress = useScheduleStore((s) => s.ncaaProgress)
+  const ncaaError = useScheduleStore((s) => s.ncaaError)
+  const fetchNcaaSchedules = useScheduleStore((s) => s.fetchNcaaSchedules)
 
   const [startDate, setStartDate] = useState('2026-03-01')
   const [endDate, setEndDate] = useState('2026-09-30')
@@ -253,31 +258,65 @@ export default function ScheduleView() {
       {/* NCAA players section */}
       {ncaaPlayers.length > 0 && (
         <div className="rounded-xl border border-accent-green/30 bg-surface p-5">
-          <div className="mb-3 flex items-center gap-2">
-            <h2 className="text-base font-semibold text-accent-green">NCAA Players</h2>
-            <span className="rounded-full bg-accent-green/15 px-2 py-0.5 text-[10px] font-medium text-accent-green">
-              {ncaaPlayers.length} players
-            </span>
-            {isNcaaSeason(new Date().toISOString().slice(0, 10)) && (
+          <div className="mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-semibold text-accent-green">NCAA Players</h2>
               <span className="rounded-full bg-accent-green/15 px-2 py-0.5 text-[10px] font-medium text-accent-green">
-                Season Active (Feb 14 – Jun 15)
+                {ncaaPlayers.length} players
               </span>
-            )}
+              {isNcaaSeason(new Date().toISOString().slice(0, 10)) && (
+                <span className="rounded-full bg-accent-green/15 px-2 py-0.5 text-[10px] font-medium text-accent-green">
+                  Season Active
+                </span>
+              )}
+            </div>
+            <button
+              onClick={() => fetchNcaaSchedules(ncaaPlayers.map((p) => ({ playerName: p.playerName, org: p.org })))}
+              disabled={ncaaLoading}
+              className="rounded-lg bg-accent-green px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-green/80 disabled:opacity-50"
+            >
+              {ncaaLoading ? 'Fetching...' : ncaaGames.length > 0 ? 'Refresh Schedules' : 'Fetch Schedules from D1Baseball'}
+            </button>
           </div>
-          <p className="mb-3 text-xs text-text-dim">
-            Visit opportunities generated for typical home game days (Tue/Fri/Sat).
-            Non-game weekdays included with lower confidence — player may be traveling for away series.
-          </p>
+
+          {ncaaProgress && (
+            <div className="mb-3">
+              <div className="mb-1 text-xs text-text-dim">
+                Fetching schedules: {ncaaProgress.completed}/{ncaaProgress.total} schools
+              </div>
+              <div className="h-1.5 rounded-full bg-gray-800">
+                <div
+                  className="h-full rounded-full bg-accent-green transition-all"
+                  style={{ width: `${(ncaaProgress.completed / ncaaProgress.total) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
+
+          {ncaaError && (
+            <p className="mb-3 text-sm text-accent-red">{ncaaError}</p>
+          )}
+
+          {ncaaGames.length > 0 && (
+            <p className="mb-3 text-sm text-accent-green">
+              Loaded {ncaaGames.length} games ({ncaaGames.filter((g) => g.isHome).length} home, {ncaaGames.filter((g) => !g.isHome).length} away) from D1Baseball
+            </p>
+          )}
+
           <div className="grid gap-1 sm:grid-cols-2">
             {ncaaPlayers.map((player) => {
               const canonical = resolveNcaaName(player.org)
               const venue = canonical ? NCAA_VENUES[canonical] : null
+              const hasRealSchedule = ncaaGames.some((g) => g.playerNames.includes(player.playerName))
               return (
                 <div key={player.playerName} className="flex items-center justify-between rounded-lg bg-gray-950/50 px-3 py-1.5 text-sm">
                   <span className="text-text">{player.playerName}</span>
                   <span className="text-xs text-text-dim">
                     {venue ? (
-                      <span className="text-accent-green">{player.org} — {venue.venueName}</span>
+                      <span className="text-accent-green">
+                        {player.org} — {venue.venueName}
+                        {hasRealSchedule && <span className="ml-1 text-[10px] text-accent-blue">D1B</span>}
+                      </span>
                     ) : (
                       <span className="text-accent-orange">{player.org} — venue not mapped</span>
                     )}
@@ -286,12 +325,15 @@ export default function ScheduleView() {
               )
             })}
           </div>
-          <div className="mt-3 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-2">
-            <p className="text-[11px] text-accent-orange">
-              Note: NCAA schedules are estimated based on typical game days. We don't know exact away game dates.
-              On non-game days, the player is generally assumed to be at their home school, but may travel the day before an away series.
-            </p>
-          </div>
+
+          {ncaaGames.length === 0 && (
+            <div className="mt-3 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-2">
+              <p className="text-[11px] text-accent-orange">
+                Without D1Baseball schedules, NCAA games are estimated based on typical home game days.
+                Fetch real schedules above for actual dates including away games.
+              </p>
+            </div>
+          )}
         </div>
       )}
 
