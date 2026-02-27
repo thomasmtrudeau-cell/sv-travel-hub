@@ -1,4 +1,4 @@
-import type { TripCandidate, VisitConfidence } from '../../types/schedule'
+import type { TripCandidate, VisitConfidence, ScheduleSource } from '../../types/schedule'
 
 interface Props {
   trip: TripCandidate
@@ -19,6 +19,26 @@ function formatDriveTime(minutes: number): string {
   return m > 0 ? `${h}h ${m}m` : `${h}h`
 }
 
+// Derive a human-readable reason the player should be at this venue
+function getVisitContext(source: ScheduleSource, isHome: boolean, awayTeam: string): {
+  label: string
+  color: string
+} {
+  if (awayTeam === 'Spring Training') {
+    return { label: 'Spring Training', color: 'bg-accent-orange/15 text-accent-orange' }
+  }
+  if (source === 'mlb-api') {
+    return isHome
+      ? { label: 'Home Game', color: 'bg-accent-green/15 text-accent-green' }
+      : { label: 'Away Game', color: 'bg-purple-500/15 text-purple-400' }
+  }
+  if (source === 'ncaa-lookup') {
+    return { label: 'School Visit (est.)', color: 'bg-accent-green/15 text-accent-green' }
+  }
+  // hs-lookup
+  return { label: 'School Visit (est.)', color: 'bg-accent-orange/15 text-accent-orange' }
+}
+
 // Deduplicate venues: merge nearby games at the same coords into one stop
 interface VenueStop {
   venueName: string
@@ -29,6 +49,9 @@ interface VenueStop {
   dates: string[]
   confidence?: VisitConfidence
   confidenceNote?: string
+  source: ScheduleSource
+  isHome: boolean
+  awayTeam: string
 }
 
 function buildVenueStops(trip: TripCandidate): VenueStop[] {
@@ -45,6 +68,9 @@ function buildVenueStops(trip: TripCandidate): VenueStop[] {
     dates: [trip.anchorGame.date],
     confidence: trip.anchorGame.confidence,
     confidenceNote: trip.anchorGame.confidenceNote,
+    source: trip.anchorGame.source,
+    isHome: trip.anchorGame.isHome,
+    awayTeam: trip.anchorGame.awayTeam,
   })
 
   // Merge nearby games by venue
@@ -52,7 +78,6 @@ function buildVenueStops(trip: TripCandidate): VenueStop[] {
     const key = `${game.venue.coords.lat.toFixed(4)},${game.venue.coords.lng.toFixed(4)}`
     const existing = venueMap.get(key)
     if (existing) {
-      // Merge players and dates
       for (const name of game.playerNames) {
         if (!existing.players.includes(name)) existing.players.push(name)
       }
@@ -67,11 +92,13 @@ function buildVenueStops(trip: TripCandidate): VenueStop[] {
         dates: [game.date],
         confidence: game.confidence,
         confidenceNote: game.confidenceNote,
+        source: game.source,
+        isHome: game.isHome,
+        awayTeam: game.awayTeam,
       })
     }
   }
 
-  // Sort: anchor first, then by distance
   return [...venueMap.values()].sort((a, b) => {
     if (a.isAnchor) return -1
     if (b.isAnchor) return 1
@@ -82,7 +109,6 @@ function buildVenueStops(trip: TripCandidate): VenueStop[] {
 export default function TripCard({ trip, index }: Props) {
   const stops = buildVenueStops(trip)
 
-  // Collect all unique players
   const allPlayers = new Set<string>()
   for (const stop of stops) {
     for (const name of stop.players) allPlayers.add(name)
@@ -137,61 +163,68 @@ export default function TripCard({ trip, index }: Props) {
 
       {/* Venue stops */}
       <div className="space-y-2">
-        {stops.map((stop, i) => (
-          <div key={stop.venueKey}>
-            {/* Drive connector between stops */}
-            {i > 0 && stop.driveFromAnchor > 0 && (
-              <div className="my-1 flex items-center gap-2 pl-6">
-                <div className="h-px flex-1 border-t border-dashed border-border/40" />
-                <span className="text-[10px] text-text-dim/60">
-                  ~{formatDriveTime(stop.driveFromAnchor)} from stop 1
-                </span>
-                <div className="h-px flex-1 border-t border-dashed border-border/40" />
-              </div>
-            )}
+        {stops.map((stop, i) => {
+          const ctx = getVisitContext(stop.source, stop.isHome, stop.awayTeam)
 
-            <div className={`flex items-start gap-3 rounded-lg px-3 py-2.5 ${
-              stop.isAnchor
-                ? 'border border-accent-blue/20 bg-accent-blue/5'
-                : 'border border-border/30 bg-gray-950/30'
-            }`}>
-              {/* Stop number */}
-              <div className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
+          return (
+            <div key={stop.venueKey}>
+              {/* Drive connector between stops */}
+              {i > 0 && stop.driveFromAnchor > 0 && (
+                <div className="my-1 flex items-center gap-2 pl-6">
+                  <div className="h-px flex-1 border-t border-dashed border-border/40" />
+                  <span className="text-[10px] text-text-dim/60">
+                    ~{formatDriveTime(stop.driveFromAnchor)} from stop 1
+                  </span>
+                  <div className="h-px flex-1 border-t border-dashed border-border/40" />
+                </div>
+              )}
+
+              <div className={`flex items-start gap-3 rounded-lg px-3 py-2.5 ${
                 stop.isAnchor
-                  ? 'bg-accent-blue text-white'
-                  : 'bg-surface text-text-dim'
+                  ? 'border border-accent-blue/20 bg-accent-blue/5'
+                  : 'border border-border/30 bg-gray-950/30'
               }`}>
-                {i + 1}
-              </div>
-
-              <div className="min-w-0 flex-1">
-                {/* Venue name + badge */}
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium text-text">{stop.venueName}</span>
-                  {stop.isAnchor && (
-                    <span className="rounded bg-accent-blue/20 px-1.5 py-0.5 text-[10px] font-medium text-accent-blue">
-                      BASE
-                    </span>
-                  )}
+                {/* Stop number */}
+                <div className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
+                  stop.isAnchor
+                    ? 'bg-accent-blue text-white'
+                    : 'bg-surface text-text-dim'
+                }`}>
+                  {i + 1}
                 </div>
 
-                {/* Confidence badge */}
-                {stop.confidence && stop.confidence !== 'high' && (
-                  <ConfidenceBadge confidence={stop.confidence} note={stop.confidenceNote} />
-                )}
-
-                {/* Players */}
-                <div className="mt-1.5 flex flex-wrap gap-1">
-                  {stop.players.map((name) => (
-                    <span key={name} className="rounded-full bg-surface px-2.5 py-0.5 text-[11px] font-medium text-text">
-                      {name}
+                <div className="min-w-0 flex-1">
+                  {/* Venue name + context badges */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-sm font-medium text-text">{stop.venueName}</span>
+                    <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${ctx.color}`}>
+                      {ctx.label}
                     </span>
-                  ))}
+                    {stop.isAnchor && (
+                      <span className="rounded bg-accent-blue/20 px-1.5 py-0.5 text-[10px] font-medium text-accent-blue">
+                        BASE
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Confidence badge */}
+                  {stop.confidence && stop.confidence !== 'high' && (
+                    <ConfidenceBadge confidence={stop.confidence} note={stop.confidenceNote} />
+                  )}
+
+                  {/* Players */}
+                  <div className="mt-1.5 flex flex-wrap gap-1">
+                    {stop.players.map((name) => (
+                      <span key={name} className="rounded-full bg-surface px-2.5 py-0.5 text-[11px] font-medium text-text">
+                        {name}
+                      </span>
+                    ))}
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       {/* Player list */}

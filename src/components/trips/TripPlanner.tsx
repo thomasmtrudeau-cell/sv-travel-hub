@@ -230,27 +230,89 @@ export default function TripPlanner() {
           {/* Coverage stats */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <StatCard label="Road Trips" value={tripPlan.trips.length} />
-            <StatCard label="Players Reachable" value={tripPlan.totalPlayersWithVisits} />
+            <StatCard label="Fly-in Visits" value={tripPlan.flyInVisits.length} />
             <StatCard label="Player Coverage" value={`${tripPlan.coveragePercent}%`} accent={tripPlan.coveragePercent >= 70 ? 'green' : 'orange'} />
-            <StatCard label="Not Reachable" value={tripPlan.unvisitablePlayers.length} accent={tripPlan.unvisitablePlayers.length > 0 ? 'red' : 'green'} />
+            <StatCard label="No Games Found" value={tripPlan.unvisitablePlayers.length} accent={tripPlan.unvisitablePlayers.length > 0 ? 'red' : 'green'} />
           </div>
 
-          {/* Trip cards */}
-          <div className="space-y-4">
-            {tripPlan.trips.map((trip, i) => (
-              <TripCard key={`trip-${i}`} trip={trip} index={i + 1} />
-            ))}
-          </div>
+          {/* Road trip cards */}
+          {tripPlan.trips.length > 0 && (
+            <div>
+              <h3 className="mb-3 text-sm font-semibold text-text">
+                Road Trips
+                <span className="ml-2 text-xs font-normal text-text-dim">
+                  Drivable from Orlando within {Math.floor(maxDriveMinutes / 60)}h{maxDriveMinutes % 60 > 0 ? ` ${maxDriveMinutes % 60}m` : ''} radius
+                </span>
+              </h3>
+              <div className="space-y-4">
+                {tripPlan.trips.map((trip, i) => (
+                  <TripCard key={`trip-${i}`} trip={trip} index={i + 1} />
+                ))}
+              </div>
+            </div>
+          )}
 
-          {/* Unreachable players */}
+          {/* Fly-in visits */}
+          {tripPlan.flyInVisits.length > 0 && (
+            <div>
+              <h3 className="mb-2 text-sm font-semibold text-purple-400">
+                Fly-in Visits
+                <span className="ml-2 text-xs font-normal text-text-dim">
+                  Beyond driving range — requires flight
+                </span>
+              </h3>
+              <p className="mb-3 text-xs text-text-dim">
+                These players have games outside driving radius. Estimated travel includes flight + airport + rental car.
+              </p>
+              <div className="space-y-2">
+                {tripPlan.flyInVisits.map((visit, i) => (
+                  <div key={i} className="rounded-lg border border-purple-500/20 bg-purple-500/5 px-4 py-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-sm font-medium text-text">{visit.venue.name}</span>
+                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                            visit.source === 'mlb-api'
+                              ? visit.isHome ? 'bg-accent-green/15 text-accent-green' : 'bg-purple-500/15 text-purple-400'
+                              : 'bg-accent-orange/15 text-accent-orange'
+                          }`}>
+                            {visit.source === 'mlb-api'
+                              ? (visit.isHome ? 'Home Game' : 'Away Game')
+                              : 'School Visit (est.)'}
+                          </span>
+                        </div>
+                        <div className="mt-1.5 flex flex-wrap gap-1">
+                          {visit.playerNames.map((name) => (
+                            <span key={name} className="rounded-full bg-surface px-2.5 py-0.5 text-[11px] font-medium text-text">
+                              {name}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <p className="text-sm font-medium text-purple-400">
+                          ~{visit.estimatedTravelHours}h travel
+                        </p>
+                        <p className="text-[11px] text-text-dim">
+                          {visit.distanceKm.toLocaleString()} km
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Truly unreachable players (no games at all) */}
           {tripPlan.unvisitablePlayers.length > 0 && (
             <div className="rounded-xl border border-accent-red/30 bg-accent-red/5 p-5">
               <h3 className="mb-2 text-sm font-semibold text-accent-red">
-                Unreachable Players ({tripPlan.unvisitablePlayers.length})
+                No Games Found ({tripPlan.unvisitablePlayers.length})
               </h3>
               <p className="mb-3 text-xs text-text-dim">
-                These players have no games within the {Math.floor(maxDriveMinutes / 60)}h{maxDriveMinutes % 60 > 0 ? ` ${maxDriveMinutes % 60}m` : ''} driving radius during the selected window.
-                Try increasing the drive radius slider above.
+                No visit opportunities found for these players in the selected date range.
+                Their org may not be recognized, or they have no games scheduled.
               </p>
               <div className="flex flex-wrap gap-2">
                 {tripPlan.unvisitablePlayers.map((name) => (
@@ -262,7 +324,7 @@ export default function TripPlanner() {
             </div>
           )}
 
-          {tripPlan.trips.length === 0 && (
+          {tripPlan.trips.length === 0 && tripPlan.flyInVisits.length === 0 && (
             <div className="rounded-xl border border-border bg-surface p-10 text-center">
               <p className="text-text-dim">No trips could be generated for the selected date range.</p>
               <p className="mt-1 text-xs text-text-dim/60">Try expanding the date range or assigning more players.</p>

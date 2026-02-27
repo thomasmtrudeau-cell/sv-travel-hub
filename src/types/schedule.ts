@@ -41,9 +41,20 @@ export interface PriorityResult {
   reason?: string
 }
 
+export interface FlyInVisit {
+  playerNames: string[]
+  venue: { name: string; coords: Coordinates }
+  dates: string[]
+  distanceKm: number
+  estimatedTravelHours: number // flight + airport overhead
+  source: ScheduleSource
+  isHome: boolean
+}
+
 export interface TripPlan {
   trips: TripCandidate[]
-  unvisitablePlayers: string[]
+  flyInVisits: FlyInVisit[]
+  unvisitablePlayers: string[] // truly unreachable (no games at all in range)
   totalPlayersWithVisits: number
   totalVisitsCovered: number
   coveragePercent: number

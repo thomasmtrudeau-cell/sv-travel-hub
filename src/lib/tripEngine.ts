@@ -1,6 +1,6 @@
 import type { Coordinates } from '../types/roster'
 import type { RosterPlayer } from '../types/roster'
-import type { GameEvent, TripCandidate, TripPlan, PriorityResult, VisitConfidence } from '../types/schedule'
+import type { GameEvent, TripCandidate, TripPlan, PriorityResult, VisitConfidence, FlyInVisit } from '../types/schedule'
 import { TIER_VISIT_TARGETS } from '../types/roster'
 import { isSpringTraining, getSpringTrainingSite } from '../data/springTraining'
 import { resolveMLBTeamId, resolveNcaaName } from '../data/aliases'
@@ -36,6 +36,14 @@ function haversineKm(a: Coordinates, b: Coordinates): number {
 function estimateDriveMinutes(a: Coordinates, b: Coordinates): number {
   const km = haversineKm(a, b)
   return Math.round((km * 1.3 / 90) * 60)
+}
+
+// Estimate total travel time for a fly-in visit (hours)
+// Includes: drive to airport (0.5h) + security/boarding (1.5h) + flight + deplane/rental (1h)
+function estimateFlightHours(distanceKm: number): number {
+  const flightHours = distanceKm / 800 // ~800 km/h avg commercial speed
+  const overhead = 3 // airport + rental car on both ends
+  return Math.round((flightHours + overhead) * 10) / 10
 }
 
 // Get ISO week number for venue-week deduplication
@@ -346,6 +354,7 @@ export async function generateTrips(
   if (eligibleGames.length === 0) {
     return {
       trips: [],
+      flyInVisits: [],
       unvisitablePlayers: [...eligiblePlayers],
       totalPlayersWithVisits: 0,
       totalVisitsCovered: 0,
@@ -601,14 +610,78 @@ export async function generateTrips(
     remainingCandidates.shift()
   }
 
-  // Compute stats
-  const unvisitablePlayers = [...eligiblePlayers].filter((n) => !visitedPlayers.has(n))
+  // --- Fly-in visits for players beyond driving range ---
+  onProgress?.('Fly-in analysis', 'Finding fly-in options for distant players...')
+
+  const playersNotOnRoadTrips = [...eligiblePlayers].filter((n) => !visitedPlayers.has(n))
+  const flyInVisits: FlyInVisit[] = []
+  const flyInCovered = new Set<string>()
+
+  // Group remaining eligible games by venue for players not on road trips
+  const flyInVenueMap = new Map<string, {
+    venue: GameEvent['venue']
+    players: Set<string>
+    dates: Set<string>
+    source: GameEvent['source']
+    isHome: boolean
+    distanceKm: number
+  }>()
+
+  for (const game of eligibleGames) {
+    if (game.venue.coords.lat === 0 && game.venue.coords.lng === 0) continue
+    const relevantPlayers = game.playerNames.filter((n) => playersNotOnRoadTrips.includes(n))
+    if (relevantPlayers.length === 0) continue
+
+    const key = coordKey(game.venue.coords)
+    const existing = flyInVenueMap.get(key)
+    if (existing) {
+      for (const name of relevantPlayers) existing.players.add(name)
+      existing.dates.add(game.date)
+    } else {
+      const distKm = haversineKm(HOME_BASE, game.venue.coords)
+      flyInVenueMap.set(key, {
+        venue: game.venue,
+        players: new Set(relevantPlayers),
+        dates: new Set([game.date]),
+        source: game.source,
+        isHome: game.isHome,
+        distanceKm: distKm,
+      })
+    }
+  }
+
+  // Convert to FlyInVisit array (only venues beyond driving range)
+  for (const [, entry] of flyInVenueMap) {
+    const driveMinutes = estimateDriveMinutes(HOME_BASE, entry.venue.coords)
+    if (driveMinutes <= maxDriveMinutes) continue // already handled by road trips
+
+    const sortedDates = [...entry.dates].sort()
+    flyInVisits.push({
+      playerNames: [...entry.players],
+      venue: entry.venue,
+      dates: sortedDates,
+      distanceKm: Math.round(entry.distanceKm),
+      estimatedTravelHours: estimateFlightHours(entry.distanceKm),
+      source: entry.source,
+      isHome: entry.isHome,
+    })
+
+    for (const name of entry.players) flyInCovered.add(name)
+  }
+
+  // Sort fly-in visits by number of players (most valuable first)
+  flyInVisits.sort((a, b) => b.playerNames.length - a.playerNames.length)
+
+  // Truly unreachable: no games at all in date range (not even fly-in)
+  const trulyUnreachable = playersNotOnRoadTrips.filter((n) => !flyInCovered.has(n))
+
+  const totalCovered = visitedPlayers.size + flyInCovered.size
   const totalTarget = players.reduce((sum, p) => sum + (TIER_VISIT_TARGETS[p.tier] ?? 0), 0)
-  const totalCovered = visitedPlayers.size
 
   return {
     trips: selectedTrips,
-    unvisitablePlayers,
+    flyInVisits,
+    unvisitablePlayers: trulyUnreachable,
     totalPlayersWithVisits: totalCovered,
     totalVisitsCovered: totalCovered,
     coveragePercent: totalTarget > 0 ? Math.round((totalCovered / eligiblePlayers.size) * 100) : 0,
