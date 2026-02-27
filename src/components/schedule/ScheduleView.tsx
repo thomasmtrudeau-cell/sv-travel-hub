@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useRosterStore } from '../../store/rosterStore'
 import { resolveMLBTeamId } from '../../data/aliases'
+import { isSpringTraining, getSpringTrainingSite, isGrapefruitLeague } from '../../data/springTraining'
 import type { MLBAffiliate } from '../../lib/mlbApi'
 import ScheduleCalendar from './ScheduleCalendar'
 
@@ -126,6 +127,33 @@ export default function ScheduleView() {
           </div>
         )}
       </div>
+
+      {/* Spring Training info */}
+      {isSpringTraining(new Date().toISOString().slice(0, 10)) && (
+        <div className="rounded-xl border border-accent-orange/30 bg-accent-orange/5 p-5">
+          <h2 className="mb-2 text-base font-semibold text-accent-orange">Spring Training Active</h2>
+          <p className="mb-3 text-xs text-text-dim">
+            Pro players are at spring training facilities, not their regular season affiliates.
+            Grapefruit League sites (Florida) are drivable from Orlando.
+          </p>
+          <div className="grid gap-1 sm:grid-cols-2">
+            {proPlayers.map((player) => {
+              const parentId = resolveMLBTeamId(player.org)
+              const site = parentId ? getSpringTrainingSite(parentId) : null
+              if (!site) return null
+              const drivable = parentId ? isGrapefruitLeague(parentId) : false
+              return (
+                <div key={player.playerName} className="flex items-center justify-between rounded-lg bg-gray-950/50 px-3 py-1.5 text-sm">
+                  <span className="text-text">{player.playerName}</span>
+                  <span className={`text-xs ${drivable ? 'text-accent-green' : 'text-accent-red'}`}>
+                    {site.venueName} ({site.league})
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Schedule fetch controls */}
       <div className="rounded-xl border border-border bg-surface p-5">

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { TripPlan } from '../types/schedule'
-import { generateTrips } from '../lib/tripEngine'
+import { generateTrips, generateSpringTrainingEvents } from '../lib/tripEngine'
 import { useRosterStore } from './rosterStore'
 import { useScheduleStore } from './scheduleStore'
 
@@ -29,13 +29,17 @@ export const useTripStore = create<TripState>((set, get) => ({
   generateTrips: async () => {
     const { startDate, endDate } = get()
     const players = useRosterStore.getState().players
-    const games = useScheduleStore.getState().proGames
+    const scheduledGames = useScheduleStore.getState().proGames
+
+    // Merge scheduled games with spring training visit opportunities
+    const stEvents = generateSpringTrainingEvents(players, startDate, endDate)
+    const allGames = [...scheduledGames, ...stEvents]
 
     set({ computing: true, tripPlan: null, progressStep: 'Starting...', progressDetail: '' })
 
     try {
       const plan = await generateTrips(
-        games,
+        allGames,
         players,
         startDate,
         endDate,

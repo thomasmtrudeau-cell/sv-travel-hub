@@ -3,6 +3,8 @@ import type { RosterPlayer } from '../types/roster'
 import type { GameEvent, TripCandidate, TripPlan } from '../types/schedule'
 import { TIER_VISIT_TARGETS } from '../types/roster'
 import { computeDriveTimes } from './routing'
+import { isSpringTraining, getSpringTrainingSite } from '../data/springTraining'
+import { resolveMLBTeamId } from '../data/aliases'
 
 // Constants
 const HOME_BASE: Coordinates = { lat: 28.5383, lng: -81.3792 } // Orlando, FL
@@ -75,6 +77,56 @@ export function scoreTripCandidate(
     score += weight * player.visitsRemaining
   }
   return score
+}
+
+// Generate synthetic spring training visit opportunities for Pro players
+// During ST, players are at their parent org's ST facility every day (except Sunday)
+export function generateSpringTrainingEvents(
+  players: RosterPlayer[],
+  startDate: string,
+  endDate: string,
+): GameEvent[] {
+  const events: GameEvent[] = []
+  const dates = getDatesInRange(startDate, endDate).filter(
+    (d) => isSpringTraining(d) && isDateAllowed(d),
+  )
+
+  if (dates.length === 0) return events
+
+  // Group Pro players by parent org
+  const playersByOrg = new Map<number, string[]>()
+  for (const p of players) {
+    if (p.level !== 'Pro' || p.visitsRemaining <= 0) continue
+    const orgId = resolveMLBTeamId(p.org)
+    if (!orgId) continue
+    const existing = playersByOrg.get(orgId)
+    if (existing) existing.push(p.playerName)
+    else playersByOrg.set(orgId, [p.playerName])
+  }
+
+  // Create events for each org's ST site on each valid date
+  for (const [orgId, playerNames] of playersByOrg) {
+    const site = getSpringTrainingSite(orgId)
+    if (!site) continue
+
+    for (const date of dates) {
+      const d = new Date(date + 'T12:00:00Z')
+      events.push({
+        id: `st-${orgId}-${date}`,
+        date,
+        dayOfWeek: d.getUTCDay(),
+        time: date + 'T13:00:00Z',
+        homeTeam: site.venueName,
+        awayTeam: 'Spring Training',
+        isHome: true,
+        venue: { name: site.venueName, coords: site.coords },
+        source: 'mlb-api',
+        playerNames,
+      })
+    }
+  }
+
+  return events
 }
 
 // Main trip generation algorithm
