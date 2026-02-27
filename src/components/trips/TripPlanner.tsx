@@ -1,6 +1,7 @@
 import { useTripStore } from '../../store/tripStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useRosterStore } from '../../store/rosterStore'
+import { isSpringTraining } from '../../data/springTraining'
 import TripCard from './TripCard'
 
 export default function TripPlanner() {
@@ -8,7 +9,11 @@ export default function TripPlanner() {
   const proGames = useScheduleStore((s) => s.proGames)
   const players = useRosterStore((s) => s.players)
 
-  const canGenerate = proGames.length > 0 && players.length > 0 && !computing
+  // Allow generation during spring training even without fetched schedules,
+  // since ST events are generated on the fly from roster data
+  const hasStDates = isSpringTraining(startDate) || isSpringTraining(endDate)
+  const hasProPlayers = players.some((p) => p.level === 'Pro' && p.visitsRemaining > 0)
+  const canGenerate = (proGames.length > 0 || (hasStDates && hasProPlayers)) && players.length > 0 && !computing
 
   return (
     <div className="space-y-6">
@@ -49,9 +54,17 @@ export default function TripPlanner() {
 
         {!canGenerate && !computing && (
           <p className="mt-3 text-xs text-accent-orange">
-            {proGames.length === 0
-              ? 'Fetch schedules in the Schedule tab first.'
-              : 'Load the roster first.'}
+            {players.length === 0
+              ? 'Load the roster first.'
+              : proGames.length === 0 && !hasStDates
+                ? 'Fetch schedules in the Schedule tab first, or set dates within the spring training window (Feb 15 – Mar 28).'
+                : 'No eligible players with remaining visits.'}
+          </p>
+        )}
+
+        {canGenerate && proGames.length === 0 && hasStDates && (
+          <p className="mt-3 text-xs text-accent-green">
+            Spring training data available — you can generate trips to ST facilities now. For regular season trips, fetch schedules in the Schedule tab.
           </p>
         )}
 
