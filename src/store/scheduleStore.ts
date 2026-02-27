@@ -76,6 +76,8 @@ export const useScheduleStore = create<ScheduleState>()(
       schedulesProgress: null,
 
       fetchAffiliates: async () => {
+        // Skip if already cached from localStorage
+        if (get().affiliates.length > 0) return
         set({ affiliatesLoading: true, affiliatesError: null })
         try {
           const affiliates = await fetchAllAffiliates(MLB_PARENT_IDS)
@@ -178,6 +180,7 @@ export const useScheduleStore = create<ScheduleState>()(
       name: 'sv-travel-schedule',
       partialize: (state) => ({
         playerTeamAssignments: state.playerTeamAssignments,
+        affiliates: state.affiliates,
       }),
     },
   ),

@@ -51,8 +51,35 @@ export default function ScheduleView() {
 
   const isStActive = isSpringTraining(new Date().toISOString().slice(0, 10))
 
+  // Unresolved players (org not recognized)
+  const unresolvedPro = proPlayers.filter((p) => !resolveMLBTeamId(p.org))
+  const unresolvedNcaa = ncaaPlayers.filter((p) => !resolveNcaaName(p.org))
+  const hasUnresolved = unresolvedPro.length > 0 || unresolvedNcaa.length > 0
+
   return (
     <div className="space-y-6">
+      {/* Unresolved players warning */}
+      {hasUnresolved && (
+        <div className="rounded-xl border border-accent-red/30 bg-accent-red/5 p-4">
+          <h3 className="mb-2 text-sm font-semibold text-accent-red">Unrecognized Organizations</h3>
+          <p className="mb-2 text-xs text-text-dim">
+            These players' orgs don't match our alias table — they won't appear in trip planning until resolved.
+          </p>
+          <div className="flex flex-wrap gap-2">
+            {unresolvedPro.map((p) => (
+              <span key={p.playerName} className="rounded-full bg-accent-red/10 px-2.5 py-1 text-[11px] text-accent-red">
+                {p.playerName} — "{p.org}" (Pro)
+              </span>
+            ))}
+            {unresolvedNcaa.map((p) => (
+              <span key={p.playerName} className="rounded-full bg-accent-red/10 px-2.5 py-1 text-[11px] text-accent-red">
+                {p.playerName} — "{p.org}" (NCAA)
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Assignment section */}
       <div className="rounded-xl border border-border bg-surface p-5">
         <div className="mb-4 flex items-center justify-between">

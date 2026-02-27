@@ -31,7 +31,16 @@ export default function RosterDashboard() {
     const totalCompleted = players.reduce((sum, p) => sum + p.visitsCompleted, 0)
     const coveragePercent = totalTarget > 0 ? Math.round((totalCompleted / totalTarget) * 100) : 0
     const needingVisits = players.filter((p) => p.visitsRemaining > 0).length
-    return { total, totalTarget, totalCompleted, coveragePercent, needingVisits }
+
+    // Per-tier breakdown
+    const tiers = [1, 2, 3, 4].map((tier) => {
+      const tierPlayers = players.filter((p) => p.tier === tier)
+      const target = tierPlayers.reduce((sum, p) => sum + p.visitTarget2026, 0)
+      const completed = tierPlayers.reduce((sum, p) => sum + p.visitsCompleted, 0)
+      return { tier, count: tierPlayers.length, target, completed, percent: target > 0 ? Math.round((completed / target) * 100) : 0 }
+    }).filter((t) => t.count > 0)
+
+    return { total, totalTarget, totalCompleted, coveragePercent, needingVisits, tiers }
   }, [players])
 
   const filtered = players
@@ -102,6 +111,41 @@ export default function RosterDashboard() {
           accent={stats.coveragePercent >= 50 ? 'green' : stats.coveragePercent >= 25 ? 'orange' : 'red'}
         />
       </div>
+
+      {/* Per-tier coverage */}
+      {stats.tiers.length > 0 && (
+        <div className="rounded-xl border border-border bg-surface p-4">
+          <h3 className="mb-2 text-xs font-medium text-text-dim">Coverage by Tier</h3>
+          <div className="flex flex-wrap gap-4">
+            {stats.tiers.map(({ tier, count, target, completed, percent }) => (
+              <div key={tier} className="flex items-center gap-2">
+                <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold ${
+                  tier === 1 ? 'bg-accent-blue/20 text-accent-blue' :
+                  tier === 2 ? 'bg-accent-green/20 text-accent-green' :
+                  tier === 3 ? 'bg-accent-orange/20 text-accent-orange' :
+                  'bg-gray-500/20 text-gray-400'
+                }`}>
+                  {tier}
+                </span>
+                <div className="w-20">
+                  <div className="h-1.5 rounded-full bg-gray-800">
+                    <div
+                      className={`h-full rounded-full transition-all ${
+                        percent >= 50 ? 'bg-accent-green' : percent >= 25 ? 'bg-accent-orange' : 'bg-accent-red'
+                      }`}
+                      style={{ width: `${Math.min(percent, 100)}%` }}
+                    />
+                  </div>
+                </div>
+                <span className="text-[11px] text-text-dim">
+                  {completed}/{target} ({percent}%)
+                </span>
+                <span className="text-[10px] text-text-dim/50">{count} players</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-3">
