@@ -6,6 +6,21 @@ import { useRosterStore } from './rosterStore'
 import { useScheduleStore } from './scheduleStore'
 import { useVenueStore } from './venueStore'
 
+// Default: 3-day trip starting 1 week from now
+function toISO(d: Date): string {
+  return d.toISOString().split('T')[0]!
+}
+function defaultStart(): string {
+  const d = new Date()
+  d.setDate(d.getDate() + 7)
+  return toISO(d)
+}
+function defaultEnd(): string {
+  const d = new Date()
+  d.setDate(d.getDate() + 9) // +7 start + 2 more = 3 days
+  return toISO(d)
+}
+
 interface TripState {
   startDate: string
   endDate: string
@@ -23,8 +38,8 @@ interface TripState {
 }
 
 export const useTripStore = create<TripState>((set, get) => ({
-  startDate: '2026-03-01',
-  endDate: '2026-09-30',
+  startDate: defaultStart(),
+  endDate: defaultEnd(),
   maxDriveMinutes: MAX_DRIVE_MINUTES,
   priorityPlayers: [],
   tripPlan: null,

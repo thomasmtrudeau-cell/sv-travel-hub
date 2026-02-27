@@ -6,6 +6,23 @@ import { isSpringTraining } from '../../data/springTraining'
 import { isNcaaSeason, isHsSeason } from '../../lib/tripEngine'
 import TripCard from './TripCard'
 
+const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
+
+function getDayName(dateStr: string): string {
+  return DAY_NAMES[new Date(dateStr + 'T12:00:00Z').getUTCDay()]!
+}
+
+function getDaysInRange(start: string, end: string): string[] {
+  const days: string[] = []
+  const cur = new Date(start + 'T12:00:00Z')
+  const last = new Date(end + 'T12:00:00Z')
+  while (cur <= last) {
+    days.push(DAY_NAMES[cur.getUTCDay()]!)
+    cur.setUTCDate(cur.getUTCDate() + 1)
+  }
+  return days
+}
+
 export default function TripPlanner() {
   const startDate = useTripStore((s) => s.startDate)
   const endDate = useTripStore((s) => s.endDate)
@@ -58,27 +75,37 @@ export default function TripPlanner() {
       <div className="rounded-xl border border-border bg-surface p-5">
         <h2 className="mb-3 text-base font-semibold text-text">Trip Planner</h2>
         <p className="mb-4 text-xs text-text-dim">
-          Generate optimized multi-day road trips anchored around Thursday games within driving radius of each venue.
+          Generate optimized road trips within driving radius. Thursdays are preferred anchor days, Sundays are blacked out.
         </p>
 
         <div className="flex flex-wrap items-end gap-3">
           <div>
             <label className="mb-1 block text-xs text-text-dim">Start Date</label>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(e) => setDateRange(e.target.value, endDate)}
-              className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
-            />
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={startDate}
+                onChange={(e) => setDateRange(e.target.value, endDate)}
+                className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
+              />
+              <span className="rounded bg-gray-800 px-1.5 py-0.5 text-xs font-medium text-text-dim">
+                {getDayName(startDate)}
+              </span>
+            </div>
           </div>
           <div>
             <label className="mb-1 block text-xs text-text-dim">End Date</label>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(e) => setDateRange(startDate, e.target.value)}
-              className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
-            />
+            <div className="flex items-center gap-2">
+              <input
+                type="date"
+                value={endDate}
+                onChange={(e) => setDateRange(startDate, e.target.value)}
+                className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
+              />
+              <span className="rounded bg-gray-800 px-1.5 py-0.5 text-xs font-medium text-text-dim">
+                {getDayName(endDate)}
+              </span>
+            </div>
           </div>
           <div>
             <label className="mb-1 block text-xs text-text-dim">
@@ -102,6 +129,9 @@ export default function TripPlanner() {
             {computing ? 'Computing...' : 'Generate Trips'}
           </button>
         </div>
+
+        {/* Day-of-week strip */}
+        <DayStrip startDate={startDate} endDate={endDate} />
 
         {/* Priority players */}
         <div className="mt-4 rounded-lg border border-border/50 bg-gray-950/50 p-3">
@@ -255,6 +285,56 @@ function StatCard({ label, value, accent }: { label: string; value: string | num
     <div className="rounded-xl border border-border bg-surface p-4">
       <p className="text-xs font-medium text-text-dim">{label}</p>
       <p className={`mt-1 text-2xl font-bold ${accentColor}`}>{value}</p>
+    </div>
+  )
+}
+
+function DayStrip({ startDate, endDate }: { startDate: string; endDate: string }) {
+  const daysInRange = getDaysInRange(startDate, endDate)
+  const dayCount = daysInRange.length
+
+  if (dayCount < 1 || dayCount > 14) return null
+
+  // Count occurrences of each day
+  const dayCounts = new Map<string, number>()
+  for (const d of daysInRange) {
+    dayCounts.set(d, (dayCounts.get(d) ?? 0) + 1)
+  }
+
+  const hasSunday = dayCounts.has('Sun')
+  const hasThursday = dayCounts.has('Thu')
+
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1">
+      <div className="flex items-center gap-1">
+        {DAY_NAMES.map((day) => {
+          const inRange = dayCounts.has(day)
+          const isSunday = day === 'Sun'
+          const isThursday = day === 'Thu'
+
+          return (
+            <span
+              key={day}
+              className={`flex h-7 w-8 items-center justify-center rounded text-[11px] font-medium ${
+                !inRange
+                  ? 'text-text-dim/20'
+                  : isSunday
+                    ? 'bg-accent-red/15 text-accent-red line-through'
+                    : isThursday
+                      ? 'bg-accent-blue/15 text-accent-blue'
+                      : 'bg-gray-800 text-text-dim'
+              }`}
+            >
+              {day}
+            </span>
+          )
+        })}
+      </div>
+      <span className="text-[11px] text-text-dim/60">
+        {dayCount} day{dayCount !== 1 ? 's' : ''}
+        {hasThursday && ' · Thu preferred'}
+        {hasSunday && ' · Sun blacked out'}
+      </span>
     </div>
   )
 }
