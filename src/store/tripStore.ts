@@ -1,8 +1,10 @@
 import { create } from 'zustand'
+import type { Coordinates } from '../types/roster'
 import type { TripPlan } from '../types/schedule'
-import { generateTrips, generateSpringTrainingEvents } from '../lib/tripEngine'
+import { generateTrips, generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents } from '../lib/tripEngine'
 import { useRosterStore } from './rosterStore'
 import { useScheduleStore } from './scheduleStore'
+import { useVenueStore } from './venueStore'
 
 interface TripState {
   startDate: string
@@ -31,9 +33,22 @@ export const useTripStore = create<TripState>((set, get) => ({
     const players = useRosterStore.getState().players
     const scheduledGames = useScheduleStore.getState().proGames
 
-    // Merge scheduled games with spring training visit opportunities
+    // Merge scheduled games with spring training + NCAA + HS visit opportunities
     const stEvents = generateSpringTrainingEvents(players, startDate, endDate)
-    const allGames = [...scheduledGames, ...stEvents]
+    const ncaaEvents = generateNcaaEvents(players, startDate, endDate)
+
+    // Build HS venue lookup from venue store
+    const venueState = useVenueStore.getState().venues
+    const hsVenues = new Map<string, { name: string; coords: Coordinates }>()
+    for (const [key, v] of Object.entries(venueState)) {
+      if (v.source === 'hs-geocoded') {
+        const venueKey = key.replace(/^hs-/, '')
+        hsVenues.set(venueKey, { name: v.name, coords: v.coords })
+      }
+    }
+    const hsEvents = generateHsEvents(players, startDate, endDate, hsVenues)
+
+    const allGames = [...scheduledGames, ...stEvents, ...ncaaEvents, ...hsEvents]
 
     set({ computing: true, tripPlan: null, progressStep: 'Starting...', progressDetail: '' })
 

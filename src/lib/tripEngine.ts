@@ -1,10 +1,11 @@
 import type { Coordinates } from '../types/roster'
 import type { RosterPlayer } from '../types/roster'
-import type { GameEvent, TripCandidate, TripPlan } from '../types/schedule'
+import type { GameEvent, TripCandidate, TripPlan, VisitConfidence } from '../types/schedule'
 import { TIER_VISIT_TARGETS } from '../types/roster'
 import { computeDriveTimes } from './routing'
 import { isSpringTraining, getSpringTrainingSite } from '../data/springTraining'
-import { resolveMLBTeamId } from '../data/aliases'
+import { resolveMLBTeamId, resolveNcaaName } from '../data/aliases'
+import { NCAA_VENUES } from '../data/ncaaVenues'
 
 // Constants
 const HOME_BASE: Coordinates = { lat: 28.5383, lng: -81.3792 } // Orlando, FL
@@ -128,6 +129,164 @@ export function generateSpringTrainingEvents(
 
   return events
 }
+
+// NCAA baseball season: mid-February through early June
+const NCAA_SEASON_START = '02-14' // MM-DD
+const NCAA_SEASON_END = '06-15'
+// Typical NCAA home game days: Tuesday, Friday, Saturday
+const NCAA_HOME_GAME_DAYS = [2, 5, 6] // 0=Sun, 2=Tue, 5=Fri, 6=Sat
+
+function isNcaaSeason(dateStr: string): boolean {
+  const mmdd = dateStr.slice(5)
+  return mmdd >= NCAA_SEASON_START && mmdd <= NCAA_SEASON_END
+}
+
+// HS baseball season: mid-February through mid-May
+const HS_SEASON_START = '02-14'
+const HS_SEASON_END = '05-15'
+// Typical HS home game days: Tuesday, Thursday
+const HS_HOME_GAME_DAYS = [2, 4] // Tue, Thu
+
+function isHsSeason(dateStr: string): boolean {
+  const mmdd = dateStr.slice(5)
+  return mmdd >= HS_SEASON_START && mmdd <= HS_SEASON_END
+}
+
+// Generate visit opportunities for NCAA players at their school venues
+export function generateNcaaEvents(
+  players: RosterPlayer[],
+  startDate: string,
+  endDate: string,
+): GameEvent[] {
+  const events: GameEvent[] = []
+  const dates = getDatesInRange(startDate, endDate).filter(
+    (d) => isNcaaSeason(d) && isDateAllowed(d),
+  )
+
+  if (dates.length === 0) return events
+
+  // Group NCAA players by school
+  const playersBySchool = new Map<string, { players: string[]; venue: typeof NCAA_VENUES[string] }>()
+  for (const p of players) {
+    if (p.level !== 'NCAA' || p.visitsRemaining <= 0) continue
+    const canonical = resolveNcaaName(p.org)
+    if (!canonical) continue
+    const venue = NCAA_VENUES[canonical]
+    if (!venue) continue
+    const existing = playersBySchool.get(canonical)
+    if (existing) existing.players.push(p.playerName)
+    else playersBySchool.set(canonical, { players: [p.playerName], venue })
+  }
+
+  for (const [school, { players: playerNames, venue }] of playersBySchool) {
+    for (const date of dates) {
+      const d = new Date(date + 'T12:00:00Z')
+      const dow = d.getUTCDay()
+      const isGameDay = NCAA_HOME_GAME_DAYS.includes(dow)
+
+      // Determine confidence
+      let confidence: VisitConfidence
+      let confidenceNote: string
+      if (isGameDay) {
+        confidence = 'medium'
+        confidenceNote = 'Typical home game day — player likely at campus'
+      } else if (dow === 1 || dow === 3) {
+        // Mon or Wed — could be travel day for away series
+        confidence = 'low'
+        confidenceNote = 'Non-game weekday — player may be traveling for away series'
+      } else {
+        confidence = 'low'
+        confidenceNote = 'Non-game day — player assumed at campus but may be away'
+      }
+
+      events.push({
+        id: `ncaa-${school.toLowerCase().replace(/\s+/g, '-')}-${date}`,
+        date,
+        dayOfWeek: dow,
+        time: date + 'T14:00:00Z',
+        homeTeam: school,
+        awayTeam: isGameDay ? 'Home Game (estimated)' : 'No game scheduled',
+        isHome: true,
+        venue: { name: venue.venueName, coords: venue.coords },
+        source: 'ncaa-lookup',
+        playerNames,
+        confidence,
+        confidenceNote,
+      })
+    }
+  }
+
+  return events
+}
+
+// Generate visit opportunities for HS players at their school
+export function generateHsEvents(
+  players: RosterPlayer[],
+  startDate: string,
+  endDate: string,
+  hsVenues: Map<string, { name: string; coords: Coordinates }>,
+): GameEvent[] {
+  const events: GameEvent[] = []
+  const dates = getDatesInRange(startDate, endDate).filter(
+    (d) => isHsSeason(d) && isDateAllowed(d),
+  )
+
+  if (dates.length === 0) return events
+
+  // Group HS players by school+state
+  const playersBySchool = new Map<string, { players: string[]; venue: { name: string; coords: Coordinates } }>()
+  for (const p of players) {
+    if (p.level !== 'HS' || p.visitsRemaining <= 0) continue
+    const key = `${p.org.toLowerCase().trim()}|${p.state.toLowerCase().trim()}`
+    const venue = hsVenues.get(key)
+    if (!venue) continue
+    const existing = playersBySchool.get(key)
+    if (existing) existing.players.push(p.playerName)
+    else playersBySchool.set(key, { players: [p.playerName], venue })
+  }
+
+  for (const [key, { players: playerNames, venue }] of playersBySchool) {
+    const schoolName = key.split('|')[0] ?? key
+    for (const date of dates) {
+      const d = new Date(date + 'T12:00:00Z')
+      const dow = d.getUTCDay()
+      const isGameDay = HS_HOME_GAME_DAYS.includes(dow)
+
+      let confidence: VisitConfidence
+      let confidenceNote: string
+      if (isGameDay) {
+        confidence = 'medium'
+        confidenceNote = 'Typical home game day — player likely at school'
+      } else if (dow >= 1 && dow <= 5) {
+        confidence = 'low'
+        confidenceNote = 'School day but no game — player at school, may travel next day for away game'
+      } else {
+        confidence = 'low'
+        confidenceNote = 'Weekend non-game day — may not be at school'
+      }
+
+      events.push({
+        id: `hs-${schoolName.replace(/\s+/g, '-')}-${date}`,
+        date,
+        dayOfWeek: dow,
+        time: date + 'T15:30:00Z',
+        homeTeam: schoolName,
+        awayTeam: isGameDay ? 'Home Game (estimated)' : 'No game scheduled',
+        isHome: true,
+        venue: { name: venue.name, coords: venue.coords },
+        source: 'hs-lookup',
+        playerNames,
+        confidence,
+        confidenceNote,
+      })
+    }
+  }
+
+  return events
+}
+
+export { NCAA_SEASON_START, NCAA_SEASON_END, HS_SEASON_START, HS_SEASON_END }
+export { isNcaaSeason, isHsSeason }
 
 // Main trip generation algorithm
 export async function generateTrips(

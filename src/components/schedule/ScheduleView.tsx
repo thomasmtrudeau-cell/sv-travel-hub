@@ -1,14 +1,18 @@
 import { useEffect, useRef, useState } from 'react'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useRosterStore } from '../../store/rosterStore'
-import { resolveMLBTeamId } from '../../data/aliases'
+import { resolveMLBTeamId, resolveNcaaName } from '../../data/aliases'
+import { NCAA_VENUES } from '../../data/ncaaVenues'
 import { isSpringTraining, getSpringTrainingSite, isGrapefruitLeague } from '../../data/springTraining'
+import { isNcaaSeason, isHsSeason } from '../../lib/tripEngine'
 import type { MLBAffiliate } from '../../lib/mlbApi'
 import ScheduleCalendar from './ScheduleCalendar'
 
 export default function ScheduleView() {
   const players = useRosterStore((s) => s.players)
   const proPlayers = players.filter((p) => p.level === 'Pro')
+  const ncaaPlayers = players.filter((p) => p.level === 'NCAA')
+  const hsPlayers = players.filter((p) => p.level === 'HS')
 
   const affiliates = useScheduleStore((s) => s.affiliates)
   const affiliatesLoading = useScheduleStore((s) => s.affiliatesLoading)
@@ -218,6 +222,89 @@ export default function ScheduleView() {
           </p>
         )}
       </div>
+
+      {/* NCAA players section */}
+      {ncaaPlayers.length > 0 && (
+        <div className="rounded-xl border border-accent-green/30 bg-surface p-5">
+          <div className="mb-3 flex items-center gap-2">
+            <h2 className="text-base font-semibold text-accent-green">NCAA Players</h2>
+            <span className="rounded-full bg-accent-green/15 px-2 py-0.5 text-[10px] font-medium text-accent-green">
+              {ncaaPlayers.length} players
+            </span>
+            {isNcaaSeason(new Date().toISOString().slice(0, 10)) && (
+              <span className="rounded-full bg-accent-green/15 px-2 py-0.5 text-[10px] font-medium text-accent-green">
+                Season Active (Feb 14 – Jun 15)
+              </span>
+            )}
+          </div>
+          <p className="mb-3 text-xs text-text-dim">
+            Visit opportunities generated for typical home game days (Tue/Fri/Sat).
+            Non-game weekdays included with lower confidence — player may be traveling for away series.
+          </p>
+          <div className="grid gap-1 sm:grid-cols-2">
+            {ncaaPlayers.map((player) => {
+              const canonical = resolveNcaaName(player.org)
+              const venue = canonical ? NCAA_VENUES[canonical] : null
+              return (
+                <div key={player.playerName} className="flex items-center justify-between rounded-lg bg-gray-950/50 px-3 py-1.5 text-sm">
+                  <span className="text-text">{player.playerName}</span>
+                  <span className="text-xs text-text-dim">
+                    {venue ? (
+                      <span className="text-accent-green">{player.org} — {venue.venueName}</span>
+                    ) : (
+                      <span className="text-accent-orange">{player.org} — venue not mapped</span>
+                    )}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+          <div className="mt-3 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-2">
+            <p className="text-[11px] text-accent-orange">
+              Note: NCAA schedules are estimated based on typical game days. We don't know exact away game dates.
+              On non-game days, the player is generally assumed to be at their home school, but may travel the day before an away series.
+            </p>
+          </div>
+        </div>
+      )}
+
+      {/* HS players section */}
+      {hsPlayers.length > 0 && (
+        <div className="rounded-xl border border-accent-orange/30 bg-surface p-5">
+          <div className="mb-3 flex items-center gap-2">
+            <h2 className="text-base font-semibold text-accent-orange">High School Players</h2>
+            <span className="rounded-full bg-accent-orange/15 px-2 py-0.5 text-[10px] font-medium text-accent-orange">
+              {hsPlayers.length} players
+            </span>
+            {isHsSeason(new Date().toISOString().slice(0, 10)) && (
+              <span className="rounded-full bg-accent-orange/15 px-2 py-0.5 text-[10px] font-medium text-accent-orange">
+                Season Active (Feb 14 – May 15)
+              </span>
+            )}
+          </div>
+          <p className="mb-3 text-xs text-text-dim">
+            Visit opportunities generated for typical home game days (Tue/Thu).
+            Players assumed at their school on school days, but may travel for away games.
+          </p>
+          <div className="grid gap-1 sm:grid-cols-2">
+            {hsPlayers.map((player) => (
+              <div key={player.playerName} className="flex items-center justify-between rounded-lg bg-gray-950/50 px-3 py-1.5 text-sm">
+                <span className="text-text">{player.playerName}</span>
+                <span className="text-xs text-text-dim">
+                  {player.org}{player.state ? `, ${player.state}` : ''}
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="mt-3 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-2">
+            <p className="text-[11px] text-accent-orange">
+              Note: HS schedules are estimated. We don't have exact game dates.
+              Players are generally at their school on weekdays but may travel the day before away games.
+              Venues are geocoded from school name — verify accuracy on the Map tab.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Calendar view */}
       {proGames.length > 0 && <ScheduleCalendar games={proGames} />}

@@ -2,6 +2,7 @@ import { useTripStore } from '../../store/tripStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useRosterStore } from '../../store/rosterStore'
 import { isSpringTraining } from '../../data/springTraining'
+import { isNcaaSeason, isHsSeason } from '../../lib/tripEngine'
 import TripCard from './TripCard'
 
 export default function TripPlanner() {
@@ -9,11 +10,23 @@ export default function TripPlanner() {
   const proGames = useScheduleStore((s) => s.proGames)
   const players = useRosterStore((s) => s.players)
 
-  // Allow generation during spring training even without fetched schedules,
-  // since ST events are generated on the fly from roster data
+  // Allow generation when there's any visit data available:
+  // - Fetched pro schedules, OR
+  // - Spring training dates with Pro players, OR
+  // - NCAA season dates with NCAA players, OR
+  // - HS season dates with HS players
   const hasStDates = isSpringTraining(startDate) || isSpringTraining(endDate)
+  const hasNcaaDates = isNcaaSeason(startDate) || isNcaaSeason(endDate)
+  const hasHsDates = isHsSeason(startDate) || isHsSeason(endDate)
   const hasProPlayers = players.some((p) => p.level === 'Pro' && p.visitsRemaining > 0)
-  const canGenerate = (proGames.length > 0 || (hasStDates && hasProPlayers)) && players.length > 0 && !computing
+  const hasNcaaPlayers = players.some((p) => p.level === 'NCAA' && p.visitsRemaining > 0)
+  const hasHsPlayers = players.some((p) => p.level === 'HS' && p.visitsRemaining > 0)
+
+  const hasData = proGames.length > 0
+    || (hasStDates && hasProPlayers)
+    || (hasNcaaDates && hasNcaaPlayers)
+    || (hasHsDates && hasHsPlayers)
+  const canGenerate = hasData && players.length > 0 && !computing
 
   return (
     <div className="space-y-6">
@@ -56,15 +69,18 @@ export default function TripPlanner() {
           <p className="mt-3 text-xs text-accent-orange">
             {players.length === 0
               ? 'Load the roster first.'
-              : proGames.length === 0 && !hasStDates
-                ? 'Fetch schedules in the Schedule tab first, or set dates within the spring training window (Feb 15 – Mar 28).'
-                : 'No eligible players with remaining visits.'}
+              : 'No visit data for the selected date range. Adjust dates to overlap a season (ST: Feb 15–Mar 28, NCAA: Feb 14–Jun 15, HS: Feb 14–May 15) or fetch Pro schedules in the Schedule tab.'}
           </p>
         )}
 
-        {canGenerate && proGames.length === 0 && hasStDates && (
+        {canGenerate && proGames.length === 0 && (
           <p className="mt-3 text-xs text-accent-green">
-            Spring training data available — you can generate trips to ST facilities now. For regular season trips, fetch schedules in the Schedule tab.
+            {[
+              hasStDates && hasProPlayers ? 'Spring training (Pro)' : '',
+              hasNcaaDates && hasNcaaPlayers ? 'NCAA season' : '',
+              hasHsDates && hasHsPlayers ? 'HS season' : '',
+            ].filter(Boolean).join(', ')} data available — trips can be generated now.
+            {hasProPlayers && ' For exact Pro regular season schedules, also fetch schedules in the Schedule tab.'}
           </p>
         )}
 

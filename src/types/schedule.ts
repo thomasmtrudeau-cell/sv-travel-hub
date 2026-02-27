@@ -2,6 +2,9 @@ import type { Coordinates } from './roster'
 
 export type ScheduleSource = 'mlb-api' | 'ncaa-lookup' | 'hs-lookup'
 
+// Confidence that the player will actually be at this venue on this date
+export type VisitConfidence = 'high' | 'medium' | 'low'
+
 export interface GameEvent {
   id: string
   date: string // ISO date
@@ -17,6 +20,8 @@ export interface GameEvent {
   source: ScheduleSource
   playerNames: string[]
   sportId?: number
+  confidence?: VisitConfidence
+  confidenceNote?: string // e.g. "Typical home game day" or "May be traveling for away series"
 }
 
 export interface TripCandidate {
