@@ -150,7 +150,7 @@ export function generateSpringTrainingEvents(
         venue: { name: site.venueName, coords: site.coords },
         source: 'mlb-api',
         playerNames,
-        sourceUrl: 'https://www.mlb.com/spring-training/schedule',
+        sourceUrl: 'https://www.mlb.com/schedule',
       })
     }
   }

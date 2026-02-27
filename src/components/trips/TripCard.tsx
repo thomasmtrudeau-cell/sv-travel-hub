@@ -216,7 +216,7 @@ export default function TripCard({ trip, index }: Props) {
                         className="rounded px-1.5 py-0.5 text-[10px] font-medium text-text-dim hover:text-accent-blue transition-colors"
                         title="Verify this game on the source schedule"
                       >
-                        Verify &nearr;
+                        {`Verify \u2197`}
                       </a>
                     )}
                   </div>
