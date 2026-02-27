@@ -10,9 +10,12 @@ interface RosterRow {
 
 function findColumn(row: RosterRow, candidates: string[]): string {
   for (const c of candidates) {
-    const key = Object.keys(row).find(
-      (k) => k.trim().toLowerCase() === c.toLowerCase()
-    )
+    const cl = c.toLowerCase()
+    const key = Object.keys(row).find((k) => {
+      const kl = k.trim().toLowerCase()
+      // Exact match or starts-with match (handles "State (High School)" matching "State")
+      return kl === cl || kl.startsWith(cl + ' ') || kl.startsWith(cl + '(')
+    })
     if (key && row[key]) return row[key].trim()
   }
   return ''
@@ -53,8 +56,9 @@ export async function fetchRoster(): Promise<RosterPlayer[]> {
       const playerName = findColumn(r, ['Name', 'Player Name', 'Player'])
       const tier = parseNumber(findColumn(r, ['Tier', 'Player Tier'])) ?? 2
       const visitTarget = TIER_VISIT_TARGETS[tier] ?? 0
+      const visitTargetRaw = parseNumber(findColumn(r, ['2026 Visit Target', 'Visit Target', 'Visits Target']))
       const visitsCompleted = parseNumber(findColumn(r, ['Visits Completed', 'Visits', 'In-Person Visits'])) ?? 0
-      const lastVisit = findColumn(r, ['Last Visit', 'Last Visit Date', 'Last In-Person'])
+      const lastVisit = findColumn(r, ['Last Visit Date', 'Last Visit', 'Last In-Person'])
       const ageRaw = findColumn(r, ['Age'])
       const dobRaw = findColumn(r, ['DOB', 'Date of Birth', 'Birthday'])
 
@@ -63,15 +67,16 @@ export async function fetchRoster(): Promise<RosterPlayer[]> {
         normalizedName: normalizeName(playerName),
         org: findColumn(r, ['Org', 'Organization', 'Team', 'School']),
         level: parseLevel(findColumn(r, ['Level', 'Player Level'])),
+        mlbId: parseNumber(findColumn(r, ['MLB_ID', 'MLB Id', 'MLB ID', 'MLBId', 'MLB Team Id'])),
         position: findColumn(r, ['Position', 'Pos']),
         state: findColumn(r, ['State', 'Home State']),
         draftClass: findColumn(r, ['Draft Class', 'Class', 'Draft Year']),
         tier,
         leadAgent: findColumn(r, ['Lead Agent', 'Agent', 'Lead']),
-        visitTarget2026: visitTarget,
+        visitTarget2026: visitTargetRaw ?? visitTarget,
         visitsCompleted,
         lastVisitDate: lastVisit || null,
-        visitsRemaining: Math.max(0, visitTarget - visitsCompleted),
+        visitsRemaining: Math.max(0, (visitTargetRaw ?? visitTarget) - visitsCompleted),
         dob: dobRaw,
         age: parseNumber(ageRaw),
         phone: findColumn(r, ['Phone', 'Cell', 'Phone Number']),

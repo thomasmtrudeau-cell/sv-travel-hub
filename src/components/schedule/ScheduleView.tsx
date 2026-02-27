@@ -70,7 +70,7 @@ export default function ScheduleView() {
         {unassigned.length > 0 && (
           <div className="space-y-2">
             {unassigned.map((player) => {
-              const parentId = resolveMLBTeamId(player.org)
+              const parentId = player.mlbId ?? resolveMLBTeamId(player.org)
               const teamOptions = parentId ? affiliatesByParent.get(parentId) ?? [] : []
 
               return (
