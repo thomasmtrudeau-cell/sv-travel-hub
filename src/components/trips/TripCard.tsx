@@ -1,4 +1,7 @@
+import { useState } from 'react'
+import { useRosterStore } from '../../store/rosterStore'
 import type { TripCandidate, VisitConfidence, ScheduleSource } from '../../types/schedule'
+import type { RosterPlayer } from '../../types/roster'
 
 interface Props {
   trip: TripCandidate
@@ -39,6 +42,63 @@ function getVisitContext(source: ScheduleSource, isHome: boolean, awayTeam: stri
   return { label: 'School Visit (est.)', color: 'bg-accent-orange/15 text-accent-orange' }
 }
 
+// Get data source badge for real vs estimated
+function getSourceBadge(source: ScheduleSource, confidence: VisitConfidence | undefined, awayTeam: string): {
+  label: string
+  color: string
+} | null {
+  if (awayTeam === 'Spring Training') {
+    return { label: 'ST Schedule', color: 'bg-pink-500/15 text-pink-400' }
+  }
+  if (source === 'mlb-api') {
+    return { label: 'Confirmed', color: 'bg-accent-green/15 text-accent-green' }
+  }
+  if (source === 'ncaa-lookup') {
+    if (confidence === 'high') {
+      return { label: 'D1Baseball', color: 'bg-accent-green/15 text-accent-green' }
+    }
+    return { label: 'Estimated', color: 'bg-accent-orange/15 text-accent-orange' }
+  }
+  if (source === 'hs-lookup') {
+    return { label: 'Estimated', color: 'bg-accent-orange/15 text-accent-orange' }
+  }
+  return null
+}
+
+// Derive org label for a venue stop
+function getOrgLabel(
+  source: ScheduleSource,
+  homeTeam: string,
+  awayTeam: string,
+  playerNames: string[],
+  players: RosterPlayer[],
+): string {
+  if (awayTeam === 'Spring Training') {
+    // ST events have venue name as homeTeam — derive org from player
+    const player = players.find((p) => playerNames.includes(p.playerName))
+    return player?.org ?? ''
+  }
+  if (source === 'mlb-api') {
+    // Regular pro game: homeTeam is already like "Cincinnati Reds"
+    return homeTeam
+  }
+  if (source === 'ncaa-lookup') {
+    return homeTeam // School name
+  }
+  if (source === 'hs-lookup') {
+    const player = players.find((p) => playerNames.includes(p.playerName))
+    return player ? `${player.org}, ${player.state}` : homeTeam
+  }
+  return homeTeam
+}
+
+const TIER_DOT_COLORS: Record<number, string> = {
+  1: 'bg-accent-red',
+  2: 'bg-accent-orange',
+  3: 'bg-yellow-400',
+  4: 'bg-gray-500',
+}
+
 // Deduplicate venues: merge nearby games at the same coords into one stop
 interface VenueStop {
   venueName: string
@@ -51,15 +111,21 @@ interface VenueStop {
   confidenceNote?: string
   source: ScheduleSource
   isHome: boolean
+  homeTeam: string
   awayTeam: string
   sourceUrl?: string
+  orgLabel: string
 }
 
-function buildVenueStops(trip: TripCandidate): VenueStop[] {
+function buildVenueStops(trip: TripCandidate, players: RosterPlayer[]): VenueStop[] {
   const venueMap = new Map<string, VenueStop>()
 
   // Add anchor venue
   const anchorKey = `${trip.anchorGame.venue.coords.lat.toFixed(4)},${trip.anchorGame.venue.coords.lng.toFixed(4)}`
+  const anchorOrg = getOrgLabel(
+    trip.anchorGame.source, trip.anchorGame.homeTeam, trip.anchorGame.awayTeam,
+    trip.anchorGame.playerNames, players,
+  )
   venueMap.set(anchorKey, {
     venueName: trip.anchorGame.venue.name,
     venueKey: anchorKey,
@@ -71,8 +137,10 @@ function buildVenueStops(trip: TripCandidate): VenueStop[] {
     confidenceNote: trip.anchorGame.confidenceNote,
     source: trip.anchorGame.source,
     isHome: trip.anchorGame.isHome,
+    homeTeam: trip.anchorGame.homeTeam,
     awayTeam: trip.anchorGame.awayTeam,
     sourceUrl: trip.anchorGame.sourceUrl,
+    orgLabel: anchorOrg,
   })
 
   // Merge nearby games by venue
@@ -85,6 +153,7 @@ function buildVenueStops(trip: TripCandidate): VenueStop[] {
       }
       if (!existing.dates.includes(game.date)) existing.dates.push(game.date)
     } else {
+      const org = getOrgLabel(game.source, game.homeTeam, game.awayTeam, game.playerNames, players)
       venueMap.set(key, {
         venueName: game.venue.name,
         venueKey: key,
@@ -96,8 +165,10 @@ function buildVenueStops(trip: TripCandidate): VenueStop[] {
         confidenceNote: game.confidenceNote,
         source: game.source,
         isHome: game.isHome,
+        homeTeam: game.homeTeam,
         awayTeam: game.awayTeam,
         sourceUrl: game.sourceUrl,
+        orgLabel: org,
       })
     }
   }
@@ -109,8 +180,54 @@ function buildVenueStops(trip: TripCandidate): VenueStop[] {
   })
 }
 
+// Generate plain-text itinerary for a trip
+export function generateItineraryText(trip: TripCandidate, index: number, stops: VenueStop[], playerMap: Map<string, RosterPlayer>): string {
+  const startDate = formatDate(trip.suggestedDays[0]!)
+  const endDate = formatDate(trip.suggestedDays[trip.suggestedDays.length - 1]!)
+  const dayCount = trip.suggestedDays.length
+  const dateLabel = dayCount === 1 ? startDate : `${startDate} – ${endDate}`
+
+  let text = `Trip #${index} — ${dateLabel} (${dayCount} day${dayCount !== 1 ? 's' : ''})\n`
+  text += `Drive from Orlando: ~${formatDriveTime(trip.driveFromHomeMinutes)}\n`
+
+  for (let i = 0; i < stops.length; i++) {
+    const stop = stops[i]!
+    const label = stop.orgLabel && stop.orgLabel !== stop.venueName
+      ? `${stop.orgLabel} — ${stop.venueName}`
+      : stop.venueName
+    const ctx = getVisitContext(stop.source, stop.isHome, stop.awayTeam)
+    const driveNote = i > 0 && stop.driveFromAnchor > 0 ? ` (${formatDriveTime(stop.driveFromAnchor)} from Stop ${1})` : ''
+    text += `\nStop ${i + 1}: ${label} (${ctx.label})${driveNote}\n`
+    const playerDescs = stop.players.map((name) => {
+      const p = playerMap.get(name)
+      return p ? `${name} (T${p.tier})` : name
+    })
+    text += `  Players: ${playerDescs.join(', ')}\n`
+  }
+
+  if (trip.scoreBreakdown) {
+    const b = trip.scoreBreakdown
+    const parts: string[] = []
+    if (b.tier1Count > 0) parts.push(`${b.tier1Count}x T1`)
+    if (b.tier2Count > 0) parts.push(`${b.tier2Count}x T2`)
+    if (b.tier3Count > 0) parts.push(`${b.tier3Count}x T3`)
+    if (b.thursdayBonus) parts.push('Thu bonus')
+    text += `\nScore: ${b.finalScore} pts (${parts.join(' + ')})\n`
+  }
+
+  text += `Total drive: ~${formatDriveTime(trip.totalDriveMinutes)}\n`
+
+  return text
+}
+
 export default function TripCard({ trip, index }: Props) {
-  const stops = buildVenueStops(trip)
+  const players = useRosterStore((s) => s.players)
+  const playerMap = new Map<string, RosterPlayer>()
+  for (const p of players) playerMap.set(p.playerName, p)
+
+  const stops = buildVenueStops(trip, players)
+  const [showScoreDetail, setShowScoreDetail] = useState(false)
+  const [copied, setCopied] = useState(false)
 
   const allPlayers = new Set<string>()
   for (const stop of stops) {
@@ -125,14 +242,58 @@ export default function TripCard({ trip, index }: Props) {
   const dayCount = trip.suggestedDays.length
   const dateLabel = dayCount === 1 ? startDate : `${startDate} – ${endDate}`
 
+  const breakdown = trip.scoreBreakdown
+
+  // Compute route distance breakdown
+  const routeSegments: Array<{ from: string; to: string; minutes: number }> = []
+  routeSegments.push({ from: 'Orlando', to: stops[0]?.orgLabel || stops[0]?.venueName || 'Stop 1', minutes: trip.driveFromHomeMinutes })
+  for (let i = 1; i < stops.length; i++) {
+    const prev = stops[i - 1]!
+    const curr = stops[i]!
+    if (curr.driveFromAnchor > 0) {
+      routeSegments.push({
+        from: prev.orgLabel || prev.venueName,
+        to: curr.orgLabel || curr.venueName,
+        minutes: curr.driveFromAnchor,
+      })
+    }
+  }
+  // Return home from last stop
+  const lastStop = stops[stops.length - 1]
+  if (lastStop) {
+    const interVenueDrive = stops.slice(1).reduce((sum, s) => sum + s.driveFromAnchor, 0)
+    const returnMinutes = trip.totalDriveMinutes - trip.driveFromHomeMinutes - interVenueDrive
+    if (returnMinutes > 0) {
+      routeSegments.push({ from: lastStop.orgLabel || lastStop.venueName, to: 'Orlando', minutes: Math.round(returnMinutes) })
+    }
+  }
+
+  async function handleCopyItinerary() {
+    const text = generateItineraryText(trip, index, stops, playerMap)
+    await navigator.clipboard.writeText(text)
+    setCopied(true)
+    setTimeout(() => setCopied(false), 2000)
+  }
+
   return (
     <div className="rounded-xl border border-border bg-surface p-5">
       {/* Header */}
       <div className="mb-4 flex items-start justify-between gap-4">
         <div>
-          <h3 className="text-base font-semibold text-text">
-            Trip #{index}
-          </h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-base font-semibold text-text">
+              Trip #{index}
+            </h3>
+            {breakdown && (
+              <button
+                onClick={() => setShowScoreDetail(!showScoreDetail)}
+                className="rounded-lg bg-accent-blue/10 px-2 py-0.5 text-xs font-bold text-accent-blue hover:bg-accent-blue/20 transition-colors"
+                title="Click to see score breakdown"
+              >
+                {breakdown.finalScore} pts
+              </button>
+            )}
+          </div>
           <p className="mt-0.5 text-sm text-text-dim">
             {dateLabel}
             <span className="ml-2 text-xs text-text-dim/60">
@@ -141,6 +302,13 @@ export default function TripCard({ trip, index }: Props) {
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-2">
+          <button
+            onClick={handleCopyItinerary}
+            className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors"
+            title="Copy trip itinerary to clipboard"
+          >
+            {copied ? 'Copied!' : 'Copy'}
+          </button>
           <div className="rounded-lg bg-accent-blue/10 px-2.5 py-1">
             <span className="text-sm font-bold text-accent-blue">{allPlayers.size}</span>
             <span className="ml-1 text-[11px] text-accent-blue/70">
@@ -156,18 +324,51 @@ export default function TripCard({ trip, index }: Props) {
         </div>
       </div>
 
-      {/* Drive from Orlando */}
-      <div className="mb-4 flex items-center gap-2 rounded-lg bg-gray-950/40 px-3 py-2 text-xs">
-        <span className="inline-block h-2 w-2 rounded-full bg-accent-blue" />
-        <span className="text-text-dim">
-          ~{formatDriveTime(trip.driveFromHomeMinutes)} drive from Orlando
-        </span>
+      {/* Score breakdown (expandable) */}
+      {showScoreDetail && breakdown && (
+        <div className="mb-4 rounded-lg border border-accent-blue/20 bg-accent-blue/5 px-3 py-2 text-xs">
+          <div className="flex flex-wrap gap-x-4 gap-y-1">
+            {breakdown.tier1Count > 0 && (
+              <span className="text-text">{breakdown.tier1Count}x Tier 1 <span className="text-text-dim">({breakdown.tier1Points}pts)</span></span>
+            )}
+            {breakdown.tier2Count > 0 && (
+              <span className="text-text">{breakdown.tier2Count}x Tier 2 <span className="text-text-dim">({breakdown.tier2Points}pts)</span></span>
+            )}
+            {breakdown.tier3Count > 0 && (
+              <span className="text-text">{breakdown.tier3Count}x Tier 3 <span className="text-text-dim">({breakdown.tier3Points}pts)</span></span>
+            )}
+            {breakdown.thursdayBonus && (
+              <span className="text-accent-blue">Thu bonus +20%</span>
+            )}
+          </div>
+          <p className="mt-1 text-text-dim">
+            Raw: {breakdown.rawScore} → Final: {breakdown.finalScore} pts
+          </p>
+        </div>
+      )}
+
+      {/* Route distance breakdown */}
+      <div className="mb-4 rounded-lg bg-gray-950/40 px-3 py-2 text-xs">
+        <div className="flex flex-wrap items-center gap-1">
+          {routeSegments.map((seg, i) => (
+            <span key={i} className="flex items-center gap-1">
+              {i === 0 && <span className="inline-block h-2 w-2 rounded-full bg-accent-blue" />}
+              {i > 0 && <span className="text-text-dim/40">&rarr;</span>}
+              <span className="text-text-dim">{seg.to}</span>
+              <span className="text-text-dim/60">({formatDriveTime(seg.minutes)})</span>
+            </span>
+          ))}
+        </div>
+        <p className="mt-1 text-text-dim/60">
+          Total drive: ~{formatDriveTime(trip.totalDriveMinutes)}
+        </p>
       </div>
 
       {/* Venue stops */}
       <div className="space-y-2">
         {stops.map((stop, i) => {
           const ctx = getVisitContext(stop.source, stop.isHome, stop.awayTeam)
+          const srcBadge = getSourceBadge(stop.source, stop.confidence, stop.awayTeam)
 
           return (
             <div key={stop.venueKey}>
@@ -197,12 +398,24 @@ export default function TripCard({ trip, index }: Props) {
                 </div>
 
                 <div className="min-w-0 flex-1">
-                  {/* Venue name + context badges */}
+                  {/* Org label + venue name + context badges */}
                   <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="text-sm font-medium text-text">{stop.venueName}</span>
+                    {stop.orgLabel && stop.orgLabel !== stop.venueName ? (
+                      <>
+                        <span className="text-sm font-medium text-text">{stop.orgLabel}</span>
+                        <span className="text-xs text-text-dim">— {stop.venueName}</span>
+                      </>
+                    ) : (
+                      <span className="text-sm font-medium text-text">{stop.venueName}</span>
+                    )}
                     <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${ctx.color}`}>
                       {ctx.label}
                     </span>
+                    {srcBadge && (
+                      <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${srcBadge.color}`}>
+                        {srcBadge.label}
+                      </span>
+                    )}
                     {stop.isAnchor && (
                       <span className="rounded bg-accent-blue/20 px-1.5 py-0.5 text-[10px] font-medium text-accent-blue">
                         BASE
@@ -226,13 +439,20 @@ export default function TripCard({ trip, index }: Props) {
                     <ConfidenceBadge confidence={stop.confidence} note={stop.confidenceNote} />
                   )}
 
-                  {/* Players */}
+                  {/* Players with tier badges */}
                   <div className="mt-1.5 flex flex-wrap gap-1">
-                    {stop.players.map((name) => (
-                      <span key={name} className="rounded-full bg-surface px-2.5 py-0.5 text-[11px] font-medium text-text">
-                        {name}
-                      </span>
-                    ))}
+                    {stop.players.map((name) => {
+                      const player = playerMap.get(name)
+                      const tier = player?.tier ?? 4
+                      const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
+                      return (
+                        <span key={name} className="inline-flex items-center gap-1 rounded-full bg-surface px-2.5 py-0.5 text-[11px] font-medium text-text">
+                          <span className={`inline-block h-2 w-2 rounded-full ${dotColor}`} title={`Tier ${tier}`} />
+                          {name}
+                          <span className="text-text-dim/60">T{tier}</span>
+                        </span>
+                      )
+                    })}
                   </div>
                 </div>
               </div>
@@ -245,7 +465,10 @@ export default function TripCard({ trip, index }: Props) {
       <div className="mt-4 border-t border-border/30 pt-3">
         <p className="text-xs text-text-dim">
           <span className="font-medium text-text">{allPlayers.size} players:</span>{' '}
-          {[...allPlayers].join(', ')}
+          {[...allPlayers].map((name) => {
+            const p = playerMap.get(name)
+            return p ? `${name} (T${p.tier})` : name
+          }).join(', ')}
         </p>
       </div>
 

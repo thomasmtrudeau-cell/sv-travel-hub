@@ -1,6 +1,6 @@
 import type { Coordinates } from '../types/roster'
 import type { RosterPlayer } from '../types/roster'
-import type { GameEvent, TripCandidate, TripPlan, PriorityResult, VisitConfidence, FlyInVisit } from '../types/schedule'
+import type { GameEvent, TripCandidate, TripPlan, PriorityResult, VisitConfidence, FlyInVisit, ScoreBreakdown, NearMiss, UnvisitablePlayer } from '../types/schedule'
 import { TIER_VISIT_TARGETS } from '../types/roster'
 import { isSpringTraining, getSpringTrainingSite } from '../data/springTraining'
 import { resolveMLBTeamId, resolveNcaaName } from '../data/aliases'
@@ -105,6 +105,39 @@ export function scoreTripCandidate(
     score += weight * player.visitsRemaining
   }
   return score
+}
+
+// Compute detailed score breakdown for a trip
+function computeScoreBreakdown(
+  playerNames: string[],
+  playerMap: Map<string, RosterPlayer>,
+  thursdayBonus: boolean,
+): ScoreBreakdown {
+  let tier1Count = 0, tier1Points = 0
+  let tier2Count = 0, tier2Points = 0
+  let tier3Count = 0, tier3Points = 0
+
+  for (const name of playerNames) {
+    const player = playerMap.get(name)
+    if (!player) continue
+    const weight = TIER_WEIGHTS[player.tier] ?? 0
+    const pts = weight * player.visitsRemaining
+    if (player.tier === 1) { tier1Count++; tier1Points += pts }
+    else if (player.tier === 2) { tier2Count++; tier2Points += pts }
+    else if (player.tier === 3) { tier3Count++; tier3Points += pts }
+  }
+
+  const rawScore = tier1Points + tier2Points + tier3Points
+  const finalScore = thursdayBonus ? Math.round(rawScore * 1.2) : rawScore
+
+  return {
+    tier1Count, tier1Points,
+    tier2Count, tier2Points,
+    tier3Count, tier3Points,
+    thursdayBonus,
+    rawScore,
+    finalScore,
+  }
 }
 
 // Generate synthetic spring training visit opportunities for Pro players
@@ -361,10 +394,18 @@ export async function generateTrips(
   )
 
   if (eligibleGames.length === 0) {
+    // Compute reasons for each unreachable player
+    const unreachableWithReasons: UnvisitablePlayer[] = [...eligiblePlayers].map((name) => {
+      const player = playerMap.get(name)
+      if (!player) return { name, reason: 'Player not found in roster' }
+      if (player.level === 'Pro' && !resolveMLBTeamId(player.org)) return { name, reason: 'No recognized org — not in alias table' }
+      if (player.level === 'NCAA' && !resolveNcaaName(player.org)) return { name, reason: 'No recognized org — not in alias table' }
+      return { name, reason: 'No games in date range' }
+    })
     return {
       trips: [],
       flyInVisits: [],
-      unvisitablePlayers: [...eligiblePlayers],
+      unvisitablePlayers: unreachableWithReasons,
       totalPlayersWithVisits: 0,
       totalVisitsCovered: 0,
       coveragePercent: 0,
@@ -391,6 +432,8 @@ export async function generateTrips(
   // Deduplicate: only evaluate each venue once per week
   const candidates: TripCandidate[] = []
   const seenVenueWeeks = new Set<string>()
+  const nearMisses: NearMiss[] = []
+  const nearMissSeen = new Set<string>() // dedupe by player+venue
 
   for (const anchorDay of anchorDays) {
     const anchorGames = eligibleGames.filter((g) => g.date === anchorDay)
@@ -400,7 +443,25 @@ export async function generateTrips(
 
       const anchorKey = coordKey(anchor.venue.coords)
       const homeToAnchor = homeToVenue.get(anchorKey) ?? Infinity
-      if (homeToAnchor > maxDriveMinutes) continue
+      if (homeToAnchor > maxDriveMinutes) {
+        // Track near-misses: games 1-30 min over the limit
+        const overBy = homeToAnchor - maxDriveMinutes
+        if (overBy > 0 && overBy <= 30) {
+          for (const name of anchor.playerNames) {
+            if (!eligiblePlayers.has(name)) continue
+            const nmKey = `${name}|${anchorKey}`
+            if (nearMissSeen.has(nmKey)) continue
+            nearMissSeen.add(nmKey)
+            nearMisses.push({
+              playerName: name,
+              venue: anchor.venue.name,
+              driveMinutes: homeToAnchor,
+              overBy: Math.round(overBy),
+            })
+          }
+        }
+        continue
+      }
 
       // Deduplicate: same venue within same week → skip
       const weekNum = getWeekNumber(anchorDay)
@@ -422,15 +483,18 @@ export async function generateTrips(
       if (windowGames.length === 0) {
         // Solo anchor trip
         const visitedPlayersList = anchor.playerNames.filter((n) => eligiblePlayers.has(n))
+        const soloThursday = new Date(anchorDay + 'T12:00:00Z').getUTCDay() === ANCHOR_DAY
+        const soloBreakdown = computeScoreBreakdown(visitedPlayersList, playerMap, soloThursday)
         candidates.push({
           anchorGame: anchor,
           nearbyGames: [],
           suggestedDays: [anchor.date],
           totalPlayersVisited: visitedPlayersList.length,
-          visitValue: scoreTripCandidate(visitedPlayersList, playerMap),
+          visitValue: soloBreakdown.finalScore,
           driveFromHomeMinutes: homeToAnchor,
           totalDriveMinutes: homeToAnchor * 2,
           venueCount: 1,
+          scoreBreakdown: soloBreakdown,
         })
         continue
       }
@@ -463,17 +527,19 @@ export async function generateTrips(
 
       // Thursday bonus: prefer Thursday anchors with 20% value boost
       const dayOfWeek = new Date(anchorDay + 'T12:00:00Z').getUTCDay()
-      const thursdayBonus = dayOfWeek === ANCHOR_DAY ? 1.2 : 1.0
+      const isThursday = dayOfWeek === ANCHOR_DAY
+      const breakdown = computeScoreBreakdown([...allPlayerNames], playerMap, isThursday)
 
       candidates.push({
         anchorGame: anchor,
         nearbyGames,
         suggestedDays,
         totalPlayersVisited: allPlayerNames.size,
-        visitValue: Math.round(scoreTripCandidate([...allPlayerNames], playerMap) * thursdayBonus),
+        visitValue: breakdown.finalScore,
         driveFromHomeMinutes: homeToAnchor,
         totalDriveMinutes: totalDrive,
         venueCount: 1 + new Set(nearbyGames.map((g) => coordKey(g.venue.coords))).size,
+        scoreBreakdown: breakdown,
       })
     }
   }
@@ -685,10 +751,51 @@ export async function generateTrips(
   flyInVisits.sort((a, b) => b.playerNames.length - a.playerNames.length)
 
   // Truly unreachable: no games at all in date range (not even fly-in)
-  const trulyUnreachable = playersNotOnRoadTrips.filter((n) => !flyInCovered.has(n))
+  const trulyUnreachableNames = playersNotOnRoadTrips.filter((n) => !flyInCovered.has(n))
+
+  // Compute reasons for each unreachable player
+  const trulyUnreachable: UnvisitablePlayer[] = trulyUnreachableNames.map((name) => {
+    const player = playerMap.get(name)
+    if (!player) return { name, reason: 'Player not found in roster' }
+
+    // Check if org is recognized
+    if (player.level === 'Pro' && !resolveMLBTeamId(player.org)) {
+      return { name, reason: 'No recognized org — not in alias table' }
+    }
+    if (player.level === 'NCAA' && !resolveNcaaName(player.org)) {
+      return { name, reason: 'No recognized org — not in alias table' }
+    }
+
+    // Check if player had ANY games generated
+    const playerGames = games.filter((g) => g.playerNames.includes(name))
+    if (playerGames.length === 0) {
+      return { name, reason: 'No games in date range' }
+    }
+
+    // Check if all games have zero coords (venue couldn't be geocoded)
+    const allZeroCoords = playerGames.every((g) => g.venue.coords.lat === 0 && g.venue.coords.lng === 0)
+    if (allZeroCoords) {
+      return { name, reason: 'No venue coordinates — geocoding failed' }
+    }
+
+    // Check if all eligible games fall on Sundays
+    const allSundays = playerGames
+      .filter((g) => g.date >= startDate && g.date <= endDate)
+      .every((g) => new Date(g.date + 'T12:00:00Z').getUTCDay() === 0)
+    if (allSundays) {
+      return { name, reason: 'All games on Sundays (blackout days)' }
+    }
+
+    return { name, reason: 'No games in date range' }
+  })
 
   const totalCovered = visitedPlayers.size + flyInCovered.size
   const totalTarget = players.reduce((sum, p) => sum + (TIER_VISIT_TARGETS[p.tier] ?? 0), 0)
+
+  // Dedupe near-misses: only keep if player not already covered
+  const filteredNearMisses = nearMisses.filter(
+    (nm) => !visitedPlayers.has(nm.playerName) && !flyInCovered.has(nm.playerName),
+  )
 
   return {
     trips: selectedTrips,
@@ -698,6 +805,7 @@ export async function generateTrips(
     totalVisitsCovered: totalCovered,
     coveragePercent: totalTarget > 0 ? Math.round((totalCovered / eligiblePlayers.size) * 100) : 0,
     priorityResults: priorityResults.length > 0 ? priorityResults : undefined,
+    nearMisses: filteredNearMisses.length > 0 ? filteredNearMisses : undefined,
   }
 }
 

@@ -38,6 +38,10 @@ interface ScheduleState {
   ncaaError: string | null
   ncaaProgress: { completed: number; total: number } | null
 
+  // Fetch timestamps
+  proFetchedAt: number | null
+  ncaaFetchedAt: number | null
+
   // Actions
   fetchAffiliates: () => Promise<void>
   assignPlayerToTeam: (playerName: string, assignment: PlayerTeamAssignment) => void
@@ -92,6 +96,9 @@ export const useScheduleStore = create<ScheduleState>()(
       ncaaLoading: false,
       ncaaError: null,
       ncaaProgress: null,
+
+      proFetchedAt: null,
+      ncaaFetchedAt: null,
 
       fetchAffiliates: async () => {
         // Skip if already cached from localStorage
@@ -184,6 +191,7 @@ export const useScheduleStore = create<ScheduleState>()(
             proGames: allGames,
             schedulesLoading: false,
             schedulesProgress: null,
+            proFetchedAt: Date.now(),
           })
         } catch (e) {
           set({
@@ -272,6 +280,7 @@ export const useScheduleStore = create<ScheduleState>()(
             ncaaGames: allGames,
             ncaaLoading: false,
             ncaaProgress: null,
+            ncaaFetchedAt: Date.now(),
           })
         } catch (e) {
           set({
@@ -287,6 +296,8 @@ export const useScheduleStore = create<ScheduleState>()(
       partialize: (state) => ({
         playerTeamAssignments: state.playerTeamAssignments,
         affiliates: state.affiliates,
+        proFetchedAt: state.proFetchedAt,
+        ncaaFetchedAt: state.ncaaFetchedAt,
       }),
     },
   ),

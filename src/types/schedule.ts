@@ -25,6 +25,15 @@ export interface GameEvent {
   sourceUrl?: string // Link to verify this game (MLB Gameday, D1Baseball schedule, etc.)
 }
 
+export interface ScoreBreakdown {
+  tier1Count: number; tier1Points: number
+  tier2Count: number; tier2Points: number
+  tier3Count: number; tier3Points: number
+  thursdayBonus: boolean
+  rawScore: number
+  finalScore: number
+}
+
 export interface TripCandidate {
   anchorGame: GameEvent
   nearbyGames: Array<GameEvent & { driveMinutes: number }>
@@ -34,6 +43,7 @@ export interface TripCandidate {
   driveFromHomeMinutes: number // Orlando → anchor drive time
   totalDriveMinutes: number // estimated total driving (round trip)
   venueCount: number // number of distinct venues visited
+  scoreBreakdown?: ScoreBreakdown
 }
 
 export interface PriorityResult {
@@ -53,12 +63,25 @@ export interface FlyInVisit {
   sourceUrl?: string
 }
 
+export interface NearMiss {
+  playerName: string
+  venue: string
+  driveMinutes: number
+  overBy: number // minutes over the limit
+}
+
+export interface UnvisitablePlayer {
+  name: string
+  reason: string
+}
+
 export interface TripPlan {
   trips: TripCandidate[]
   flyInVisits: FlyInVisit[]
-  unvisitablePlayers: string[] // truly unreachable (no games at all in range)
+  unvisitablePlayers: UnvisitablePlayer[]
   totalPlayersWithVisits: number
   totalVisitsCovered: number
   coveragePercent: number
   priorityResults?: PriorityResult[]
+  nearMisses?: NearMiss[]
 }

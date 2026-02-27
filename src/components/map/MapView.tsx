@@ -74,12 +74,18 @@ function buildPopupHtml(
   venueName: string,
   source: string,
   playerList: Array<{ name: string; tier: number; level: string }> | undefined,
+  orgLabel?: string,
 ): string {
   const tierColors: Record<number, string> = {
     1: '#ef4444', 2: '#f97316', 3: '#eab308', 4: '#6b7280',
   }
   let html = `<div style="font-family:system-ui;min-width:160px">`
-  html += `<div style="font-weight:600;font-size:13px;margin-bottom:4px">${venueName}</div>`
+  if (orgLabel && orgLabel !== venueName) {
+    html += `<div style="font-weight:600;font-size:13px;margin-bottom:2px">${orgLabel}</div>`
+    html += `<div style="font-size:11px;color:#aaa;margin-bottom:4px">${venueName}</div>`
+  } else {
+    html += `<div style="font-weight:600;font-size:13px;margin-bottom:4px">${venueName}</div>`
+  }
   html += `<div style="font-size:10px;color:#888;margin-bottom:6px">${source}</div>`
 
   if (playerList && playerList.length > 0) {
@@ -261,7 +267,21 @@ export default function MapView() {
 
       const sourceLabel = isPro ? 'Pro Venue (from schedule)' : isSt ? 'Spring Training Site' : isNcaa ? 'NCAA Venue' : 'HS Venue (geocoded)'
       const playerList = venuePlayerMap.get(key)
-      const popup = buildPopupHtml(venue.name, sourceLabel, playerList)
+
+      // Derive org label from players at this venue
+      let orgLabel: string | undefined
+      if (playerList && playerList.length > 0) {
+        const firstPlayer = players.find((p) => p.playerName === playerList[0]!.name)
+        if (firstPlayer) {
+          if (isHs) {
+            orgLabel = `${firstPlayer.org}, ${firstPlayer.state}`
+          } else {
+            orgLabel = firstPlayer.org
+          }
+        }
+      }
+
+      const popup = buildPopupHtml(venue.name, sourceLabel, playerList, orgLabel)
 
       L.marker([venue.coords.lat, venue.coords.lng], { icon })
         .bindPopup(popup, { maxWidth: 280 })

@@ -8,6 +8,17 @@ import { isNcaaSeason, isHsSeason } from '../../lib/tripEngine'
 import type { MLBAffiliate } from '../../lib/mlbApi'
 import ScheduleCalendar from './ScheduleCalendar'
 
+function formatTimeAgo(ts: number): string {
+  const diff = Date.now() - ts
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
+
 export default function ScheduleView() {
   const players = useRosterStore((s) => s.players)
   const proPlayers = players.filter((p) => p.level === 'Pro')
@@ -30,6 +41,8 @@ export default function ScheduleView() {
   const ncaaProgress = useScheduleStore((s) => s.ncaaProgress)
   const ncaaError = useScheduleStore((s) => s.ncaaError)
   const fetchNcaaSchedules = useScheduleStore((s) => s.fetchNcaaSchedules)
+  const proFetchedAt = useScheduleStore((s) => s.proFetchedAt)
+  const ncaaFetchedAt = useScheduleStore((s) => s.ncaaFetchedAt)
 
   const [startDate, setStartDate] = useState('2026-03-01')
   const [endDate, setEndDate] = useState('2026-09-30')
@@ -201,7 +214,21 @@ export default function ScheduleView() {
 
       {/* Schedule fetch controls */}
       <div className="rounded-xl border border-border bg-surface p-5">
-        <h2 className="mb-3 text-base font-semibold text-text">Fetch Schedules</h2>
+        <div className="mb-3 flex items-center gap-2">
+          <h2 className="text-base font-semibold text-text">Fetch Schedules</h2>
+          {proFetchedAt && (
+            <span className={`rounded px-2 py-0.5 text-[10px] font-medium ${
+              Date.now() - proFetchedAt > 24 * 60 * 60 * 1000
+                ? 'bg-accent-orange/10 text-accent-orange'
+                : 'bg-accent-green/10 text-accent-green'
+            }`}>
+              Pro: {formatTimeAgo(proFetchedAt)}
+            </span>
+          )}
+          {!proFetchedAt && proGames.length === 0 && (
+            <span className="rounded bg-gray-800 px-2 py-0.5 text-[10px] text-text-dim/60">Pro: never fetched</span>
+          )}
+        </div>
         <div className="flex flex-wrap items-end gap-3">
           <div>
             <label className="mb-1 block text-xs text-text-dim">Start Date</label>
@@ -264,6 +291,15 @@ export default function ScheduleView() {
               <span className="rounded-full bg-accent-green/15 px-2 py-0.5 text-[10px] font-medium text-accent-green">
                 {ncaaPlayers.length} players
               </span>
+              {ncaaFetchedAt && (
+                <span className={`rounded px-2 py-0.5 text-[10px] font-medium ${
+                  Date.now() - ncaaFetchedAt > 24 * 60 * 60 * 1000
+                    ? 'bg-accent-orange/10 text-accent-orange'
+                    : 'bg-accent-green/10 text-accent-green'
+                }`}>
+                  fetched {formatTimeAgo(ncaaFetchedAt)}
+                </span>
+              )}
               {isNcaaSeason(new Date().toISOString().slice(0, 10)) && (
                 <span className="rounded-full bg-accent-green/15 px-2 py-0.5 text-[10px] font-medium text-accent-green">
                   Season Active

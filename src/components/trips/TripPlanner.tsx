@@ -1,12 +1,20 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useTripStore } from '../../store/tripStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useRosterStore } from '../../store/rosterStore'
 import { isSpringTraining } from '../../data/springTraining'
 import { isNcaaSeason, isHsSeason } from '../../lib/tripEngine'
-import TripCard from './TripCard'
+import TripCard, { generateItineraryText } from './TripCard'
+import type { RosterPlayer } from '../../types/roster'
 
 const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'] as const
+
+const TIER_DOT_COLORS: Record<number, string> = {
+  1: 'bg-accent-red',
+  2: 'bg-accent-orange',
+  3: 'bg-yellow-400',
+  4: 'bg-gray-500',
+}
 
 function getDayName(dateStr: string): string {
   return DAY_NAMES[new Date(dateStr + 'T12:00:00Z').getUTCDay()]!
@@ -23,6 +31,24 @@ function getDaysInRange(start: string, end: string): string[] {
   return days
 }
 
+function formatDriveTime(minutes: number): string {
+  const h = Math.floor(minutes / 60)
+  const m = minutes % 60
+  if (h === 0) return `${m}m`
+  return m > 0 ? `${h}h ${m}m` : `${h}h`
+}
+
+function formatTimeAgo(ts: number): string {
+  const diff = Date.now() - ts
+  const mins = Math.floor(diff / 60000)
+  if (mins < 1) return 'just now'
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.floor(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.floor(hours / 24)
+  return `${days}d ago`
+}
+
 export default function TripPlanner() {
   const startDate = useTripStore((s) => s.startDate)
   const endDate = useTripStore((s) => s.endDate)
@@ -37,7 +63,18 @@ export default function TripPlanner() {
   const setPriorityPlayers = useTripStore((s) => s.setPriorityPlayers)
   const generateTrips = useTripStore((s) => s.generateTrips)
   const proGames = useScheduleStore((s) => s.proGames)
+  const proFetchedAt = useScheduleStore((s) => s.proFetchedAt)
+  const ncaaFetchedAt = useScheduleStore((s) => s.ncaaFetchedAt)
   const players = useRosterStore((s) => s.players)
+
+  const [copiedAll, setCopiedAll] = useState(false)
+
+  // Build player lookup
+  const playerMap = useMemo(() => {
+    const map = new Map<string, RosterPlayer>()
+    for (const p of players) map.set(p.playerName, p)
+    return map
+  }, [players])
 
   // Players eligible for priority selection (have visits remaining)
   const eligibleForPriority = useMemo(
@@ -58,6 +95,11 @@ export default function TripPlanner() {
     || (hasHsDates && hasHsPlayers)
   const canGenerate = hasData && players.length > 0 && !computing
 
+  // Data freshness checks
+  const proStale = proFetchedAt && (Date.now() - proFetchedAt > 24 * 60 * 60 * 1000)
+  const ncaaStale = ncaaFetchedAt && (Date.now() - ncaaFetchedAt > 24 * 60 * 60 * 1000)
+  const showFreshnessWarning = (hasProPlayers && (proStale || !proFetchedAt)) || (hasNcaaPlayers && (ncaaStale || !ncaaFetchedAt))
+
   function handlePriorityChange(slot: 0 | 1, value: string) {
     const next = [...priorityPlayers]
     if (value === '') {
@@ -69,6 +111,22 @@ export default function TripPlanner() {
     setPriorityPlayers([...new Set(next.filter(Boolean))])
   }
 
+  async function handleCopyAllTrips() {
+    if (!tripPlan) return
+    // We can't easily access stops from here without re-building them,
+    // so generate a simplified version per trip
+    const texts: string[] = []
+    for (let i = 0; i < tripPlan.trips.length; i++) {
+      const trip = tripPlan.trips[i]!
+      // Build stops inline
+      const stops = buildSimpleStops(trip)
+      texts.push(generateItineraryText(trip, i + 1, stops, playerMap))
+    }
+    await navigator.clipboard.writeText(texts.join('\n---\n\n'))
+    setCopiedAll(true)
+    setTimeout(() => setCopiedAll(false), 2000)
+  }
+
   return (
     <div className="space-y-6">
       {/* Controls */}
@@ -77,6 +135,36 @@ export default function TripPlanner() {
         <p className="mb-4 text-xs text-text-dim">
           Generate optimized road trips within driving radius. Thursdays are preferred anchor days, Sundays are blacked out.
         </p>
+
+        {/* Data freshness indicators */}
+        <div className="mb-4 flex flex-wrap gap-2 text-[11px]">
+          <span className={`rounded px-2 py-0.5 ${
+            proFetchedAt
+              ? proStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'
+              : 'bg-gray-800 text-text-dim/60'
+          }`}>
+            Pro: {proFetchedAt ? `fetched ${formatTimeAgo(proFetchedAt)}` : 'never fetched'}
+          </span>
+          <span className={`rounded px-2 py-0.5 ${
+            ncaaFetchedAt
+              ? ncaaStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'
+              : 'bg-gray-800 text-text-dim/60'
+          }`}>
+            NCAA: {ncaaFetchedAt ? `fetched ${formatTimeAgo(ncaaFetchedAt)}` : 'never fetched'}
+          </span>
+        </div>
+
+        {showFreshnessWarning && (
+          <div className="mb-4 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-1.5">
+            <p className="text-[11px] text-accent-orange">
+              {!proFetchedAt && hasProPlayers && 'Pro schedules never fetched. '}
+              {proStale && 'Pro schedules are stale (>24h). '}
+              {!ncaaFetchedAt && hasNcaaPlayers && 'NCAA schedules never fetched. '}
+              {ncaaStale && 'NCAA schedules are stale (>24h). '}
+              Refresh on the Schedule tab for the latest data.
+            </p>
+          </div>
+        )}
 
         <div className="flex flex-wrap items-end gap-3">
           <div>
@@ -238,16 +326,54 @@ export default function TripPlanner() {
           {/* Road trip cards */}
           {tripPlan.trips.length > 0 && (
             <div>
-              <h3 className="mb-3 text-sm font-semibold text-text">
-                Road Trips
-                <span className="ml-2 text-xs font-normal text-text-dim">
-                  Drivable from Orlando within {Math.floor(maxDriveMinutes / 60)}h{maxDriveMinutes % 60 > 0 ? ` ${maxDriveMinutes % 60}m` : ''} radius
-                </span>
-              </h3>
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-text">
+                  Road Trips
+                  <span className="ml-2 text-xs font-normal text-text-dim">
+                    Drivable from Orlando within {Math.floor(maxDriveMinutes / 60)}h{maxDriveMinutes % 60 > 0 ? ` ${maxDriveMinutes % 60}m` : ''} radius
+                  </span>
+                </h3>
+                <button
+                  onClick={handleCopyAllTrips}
+                  className="rounded-lg bg-gray-800 px-3 py-1.5 text-xs font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors"
+                >
+                  {copiedAll ? 'Copied!' : 'Copy All Trips'}
+                </button>
+              </div>
               <div className="space-y-4">
                 {tripPlan.trips.map((trip, i) => (
                   <TripCard key={`trip-${i}`} trip={trip} index={i + 1} />
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* Near-misses */}
+          {tripPlan.nearMisses && tripPlan.nearMisses.length > 0 && (
+            <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/5 p-5">
+              <h3 className="mb-2 text-sm font-semibold text-yellow-400">
+                Near Misses
+                <span className="ml-2 text-xs font-normal text-text-dim">
+                  Extend drive to also reach these players
+                </span>
+              </h3>
+              <div className="space-y-1.5">
+                {tripPlan.nearMisses.map((nm, i) => {
+                  const player = playerMap.get(nm.playerName)
+                  const tier = player?.tier ?? 4
+                  const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
+                  return (
+                    <div key={i} className="flex items-center gap-2 text-sm">
+                      <span className={`h-2 w-2 rounded-full ${dotColor}`} />
+                      <span className="font-medium text-text">{nm.playerName}</span>
+                      <span className="text-xs text-text-dim">T{tier}</span>
+                      <span className="text-xs text-text-dim">@ {nm.venue}</span>
+                      <span className="ml-auto text-xs text-yellow-400">
+                        +{nm.overBy}m over limit ({formatDriveTime(nm.driveMinutes)} drive)
+                      </span>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}
@@ -265,57 +391,84 @@ export default function TripPlanner() {
                 These players have games outside driving radius. Estimated travel includes flight + airport + rental car.
               </p>
               <div className="space-y-2">
-                {tripPlan.flyInVisits.map((visit, i) => (
-                  <div key={i} className="rounded-lg border border-purple-500/20 bg-purple-500/5 px-4 py-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-1.5">
-                          <span className="text-sm font-medium text-text">{visit.venue.name}</span>
-                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                            visit.source === 'mlb-api'
-                              ? visit.isHome ? 'bg-accent-green/15 text-accent-green' : 'bg-purple-500/15 text-purple-400'
-                              : 'bg-accent-orange/15 text-accent-orange'
-                          }`}>
-                            {visit.source === 'mlb-api'
-                              ? (visit.isHome ? 'Home Game' : 'Away Game')
-                              : 'School Visit (est.)'}
-                          </span>
-                          {visit.sourceUrl && (
-                            <a
-                              href={visit.sourceUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="rounded px-1.5 py-0.5 text-[10px] font-medium text-text-dim hover:text-purple-400 transition-colors"
-                              title="Verify this game on the source schedule"
-                            >
-                              {`Verify \u2197`}
-                            </a>
-                          )}
-                        </div>
-                        <div className="mt-1.5 flex flex-wrap gap-1">
-                          {visit.playerNames.map((name) => (
-                            <span key={name} className="rounded-full bg-surface px-2.5 py-0.5 text-[11px] font-medium text-text">
-                              {name}
+                {tripPlan.flyInVisits.map((visit, i) => {
+                  // Derive org label for fly-in
+                  const firstPlayer = players.find((p) => visit.playerNames.includes(p.playerName))
+                  let orgLabel = ''
+                  if (visit.source === 'hs-lookup' && firstPlayer) {
+                    orgLabel = `${firstPlayer.org}, ${firstPlayer.state}`
+                  } else if (visit.source === 'ncaa-lookup' && firstPlayer) {
+                    orgLabel = firstPlayer.org
+                  } else if (visit.source === 'mlb-api' && firstPlayer) {
+                    orgLabel = firstPlayer.org
+                  }
+
+                  return (
+                    <div key={i} className="rounded-lg border border-purple-500/20 bg-purple-500/5 px-4 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            {orgLabel && orgLabel !== visit.venue.name ? (
+                              <>
+                                <span className="text-sm font-medium text-text">{orgLabel}</span>
+                                <span className="text-xs text-text-dim">— {visit.venue.name}</span>
+                              </>
+                            ) : (
+                              <span className="text-sm font-medium text-text">{visit.venue.name}</span>
+                            )}
+                            <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                              visit.source === 'mlb-api'
+                                ? visit.isHome ? 'bg-accent-green/15 text-accent-green' : 'bg-purple-500/15 text-purple-400'
+                                : 'bg-accent-orange/15 text-accent-orange'
+                            }`}>
+                              {visit.source === 'mlb-api'
+                                ? (visit.isHome ? 'Home Game' : 'Away Game')
+                                : 'School Visit (est.)'}
                             </span>
-                          ))}
+                            {visit.sourceUrl && (
+                              <a
+                                href={visit.sourceUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="rounded px-1.5 py-0.5 text-[10px] font-medium text-text-dim hover:text-purple-400 transition-colors"
+                                title="Verify this game on the source schedule"
+                              >
+                                {`Verify \u2197`}
+                              </a>
+                            )}
+                          </div>
+                          <div className="mt-1.5 flex flex-wrap gap-1">
+                            {visit.playerNames.map((name) => {
+                              const player = playerMap.get(name)
+                              const tier = player?.tier ?? 4
+                              const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
+                              return (
+                                <span key={name} className="inline-flex items-center gap-1 rounded-full bg-surface px-2.5 py-0.5 text-[11px] font-medium text-text">
+                                  <span className={`inline-block h-2 w-2 rounded-full ${dotColor}`} title={`Tier ${tier}`} />
+                                  {name}
+                                  <span className="text-text-dim/60">T{tier}</span>
+                                </span>
+                              )
+                            })}
+                          </div>
                         </div>
-                      </div>
-                      <div className="shrink-0 text-right">
-                        <p className="text-sm font-medium text-purple-400">
-                          ~{visit.estimatedTravelHours}h travel
-                        </p>
-                        <p className="text-[11px] text-text-dim">
-                          {visit.distanceKm.toLocaleString()} km
-                        </p>
+                        <div className="shrink-0 text-right">
+                          <p className="text-sm font-medium text-purple-400">
+                            ~{visit.estimatedTravelHours}h travel
+                          </p>
+                          <p className="text-[11px] text-text-dim">
+                            {visit.distanceKm.toLocaleString()} km
+                          </p>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  )
+                })}
               </div>
             </div>
           )}
 
-          {/* Truly unreachable players (no games at all) */}
+          {/* Truly unreachable players (no games at all) — with reasons */}
           {tripPlan.unvisitablePlayers.length > 0 && (
             <div className="rounded-xl border border-accent-red/30 bg-accent-red/5 p-5">
               <h3 className="mb-2 text-sm font-semibold text-accent-red">
@@ -323,14 +476,21 @@ export default function TripPlanner() {
               </h3>
               <p className="mb-3 text-xs text-text-dim">
                 No visit opportunities found for these players in the selected date range.
-                Their org may not be recognized, or they have no games scheduled.
               </p>
-              <div className="flex flex-wrap gap-2">
-                {tripPlan.unvisitablePlayers.map((name) => (
-                  <span key={name} className="rounded-full bg-accent-red/10 px-3 py-1 text-xs text-accent-red">
-                    {name}
-                  </span>
-                ))}
+              <div className="space-y-1.5">
+                {tripPlan.unvisitablePlayers.map((entry) => {
+                  const player = playerMap.get(entry.name)
+                  const tier = player?.tier ?? 4
+                  const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
+                  return (
+                    <div key={entry.name} className="flex items-center gap-2 text-sm">
+                      <span className={`h-2 w-2 rounded-full ${dotColor}`} />
+                      <span className="font-medium text-accent-red">{entry.name}</span>
+                      <span className="text-xs text-text-dim">T{tier}</span>
+                      <span className="text-xs text-text-dim/70">— {entry.reason}</span>
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )}
@@ -345,6 +505,68 @@ export default function TripPlanner() {
       )}
     </div>
   )
+}
+
+// Simplified stop builder for Copy All Trips (mirrors TripCard logic)
+function buildSimpleStops(trip: import('../../types/schedule').TripCandidate) {
+  const venueMap = new Map<string, {
+    venueName: string; venueKey: string; players: string[]; driveFromAnchor: number
+    isAnchor: boolean; dates: string[]; confidence?: import('../../types/schedule').VisitConfidence
+    confidenceNote?: string; source: import('../../types/schedule').ScheduleSource
+    isHome: boolean; homeTeam: string; awayTeam: string; sourceUrl?: string; orgLabel: string
+  }>()
+
+  const anchorKey = `${trip.anchorGame.venue.coords.lat.toFixed(4)},${trip.anchorGame.venue.coords.lng.toFixed(4)}`
+  venueMap.set(anchorKey, {
+    venueName: trip.anchorGame.venue.name,
+    venueKey: anchorKey,
+    players: [...trip.anchorGame.playerNames],
+    driveFromAnchor: 0,
+    isAnchor: true,
+    dates: [trip.anchorGame.date],
+    confidence: trip.anchorGame.confidence,
+    confidenceNote: trip.anchorGame.confidenceNote,
+    source: trip.anchorGame.source,
+    isHome: trip.anchorGame.isHome,
+    homeTeam: trip.anchorGame.homeTeam,
+    awayTeam: trip.anchorGame.awayTeam,
+    sourceUrl: trip.anchorGame.sourceUrl,
+    orgLabel: trip.anchorGame.homeTeam,
+  })
+
+  for (const game of trip.nearbyGames) {
+    const key = `${game.venue.coords.lat.toFixed(4)},${game.venue.coords.lng.toFixed(4)}`
+    const existing = venueMap.get(key)
+    if (existing) {
+      for (const name of game.playerNames) {
+        if (!existing.players.includes(name)) existing.players.push(name)
+      }
+      if (!existing.dates.includes(game.date)) existing.dates.push(game.date)
+    } else {
+      venueMap.set(key, {
+        venueName: game.venue.name,
+        venueKey: key,
+        players: [...game.playerNames],
+        driveFromAnchor: game.driveMinutes,
+        isAnchor: false,
+        dates: [game.date],
+        confidence: game.confidence,
+        confidenceNote: game.confidenceNote,
+        source: game.source,
+        isHome: game.isHome,
+        homeTeam: game.homeTeam,
+        awayTeam: game.awayTeam,
+        sourceUrl: game.sourceUrl,
+        orgLabel: game.homeTeam,
+      })
+    }
+  }
+
+  return [...venueMap.values()].sort((a, b) => {
+    if (a.isAnchor) return -1
+    if (b.isAnchor) return 1
+    return a.driveFromAnchor - b.driveFromAnchor
+  })
 }
 
 function StatCard({ label, value, accent }: { label: string; value: string | number; accent?: string }) {
