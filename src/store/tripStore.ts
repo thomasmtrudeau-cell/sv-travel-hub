@@ -10,6 +10,7 @@ interface TripState {
   startDate: string
   endDate: string
   maxDriveMinutes: number
+  priorityPlayers: string[]
   tripPlan: TripPlan | null
   computing: boolean
   progressStep: string
@@ -17,6 +18,7 @@ interface TripState {
 
   setDateRange: (start: string, end: string) => void
   setMaxDriveMinutes: (minutes: number) => void
+  setPriorityPlayers: (players: string[]) => void
   generateTrips: () => Promise<void>
 }
 
@@ -24,6 +26,7 @@ export const useTripStore = create<TripState>((set, get) => ({
   startDate: '2026-03-01',
   endDate: '2026-09-30',
   maxDriveMinutes: MAX_DRIVE_MINUTES,
+  priorityPlayers: [],
   tripPlan: null,
   computing: false,
   progressStep: '',
@@ -31,9 +34,10 @@ export const useTripStore = create<TripState>((set, get) => ({
 
   setDateRange: (startDate, endDate) => set({ startDate, endDate }),
   setMaxDriveMinutes: (maxDriveMinutes) => set({ maxDriveMinutes }),
+  setPriorityPlayers: (priorityPlayers) => set({ priorityPlayers }),
 
   generateTrips: async () => {
-    const { startDate, endDate, maxDriveMinutes } = get()
+    const { startDate, endDate, maxDriveMinutes, priorityPlayers } = get()
     const players = useRosterStore.getState().players
     const scheduledGames = useScheduleStore.getState().proGames
 
@@ -64,6 +68,7 @@ export const useTripStore = create<TripState>((set, get) => ({
         endDate,
         (step, detail) => set({ progressStep: step, progressDetail: detail ?? '' }),
         maxDriveMinutes,
+        priorityPlayers,
       )
       set({ tripPlan: plan, computing: false, progressStep: '', progressDetail: '' })
     } catch (e) {

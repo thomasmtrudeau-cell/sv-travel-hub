@@ -35,10 +35,17 @@ export interface TripCandidate {
   venueCount: number // number of distinct venues visited
 }
 
+export interface PriorityResult {
+  playerName: string
+  status: 'included' | 'separate-trip' | 'unreachable'
+  reason?: string
+}
+
 export interface TripPlan {
   trips: TripCandidate[]
   unvisitablePlayers: string[]
   totalPlayersWithVisits: number
   totalVisitsCovered: number
   coveragePercent: number
+  priorityResults?: PriorityResult[]
 }

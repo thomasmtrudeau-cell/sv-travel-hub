@@ -45,11 +45,11 @@ export default function TripCard({ trip, index }: Props) {
       {/* Trip logistics summary */}
       <div className="mb-3 flex flex-wrap gap-3 rounded-lg bg-gray-950/50 px-3 py-2 text-[11px]">
         <span className="text-text-dim">
-          {homeHours}h{homeMins > 0 ? ` ${homeMins}m` : ''} from Orlando
+          ~{homeHours}h{homeMins > 0 ? ` ${homeMins}m` : ''} from Orlando
         </span>
         <span className="text-text-dim/30">|</span>
         <span className="text-text-dim">
-          {totalHours}h{totalMins > 0 ? ` ${totalMins}m` : ''} total driving
+          ~{totalHours}h{totalMins > 0 ? ` ${totalMins}m` : ''} total driving
         </span>
         <span className="text-text-dim/30">|</span>
         <span className="text-text-dim">
@@ -100,7 +100,7 @@ export default function TripCard({ trip, index }: Props) {
             <div className="min-w-0 flex-1">
               <div className="flex items-center gap-2">
                 <span className="text-sm font-medium text-text">{game.venue.name}</span>
-                <span className="text-[10px] text-text-dim">{game.driveMinutes} min drive</span>
+                <span className="text-[10px] text-text-dim">~{game.driveMinutes} min drive</span>
               </div>
               <p className="text-xs text-text-dim">
                 {game.date} — {game.homeTeam} vs {game.awayTeam}

@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import { useTripStore } from '../../store/tripStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useRosterStore } from '../../store/rosterStore'
@@ -9,21 +10,24 @@ export default function TripPlanner() {
   const startDate = useTripStore((s) => s.startDate)
   const endDate = useTripStore((s) => s.endDate)
   const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
+  const priorityPlayers = useTripStore((s) => s.priorityPlayers)
   const tripPlan = useTripStore((s) => s.tripPlan)
   const computing = useTripStore((s) => s.computing)
   const progressStep = useTripStore((s) => s.progressStep)
   const progressDetail = useTripStore((s) => s.progressDetail)
   const setDateRange = useTripStore((s) => s.setDateRange)
   const setMaxDriveMinutes = useTripStore((s) => s.setMaxDriveMinutes)
+  const setPriorityPlayers = useTripStore((s) => s.setPriorityPlayers)
   const generateTrips = useTripStore((s) => s.generateTrips)
   const proGames = useScheduleStore((s) => s.proGames)
   const players = useRosterStore((s) => s.players)
 
-  // Allow generation when there's any visit data available:
-  // - Fetched pro schedules, OR
-  // - Spring training dates with Pro players, OR
-  // - NCAA season dates with NCAA players, OR
-  // - HS season dates with HS players
+  // Players eligible for priority selection (have visits remaining)
+  const eligibleForPriority = useMemo(
+    () => players.filter((p) => p.visitsRemaining > 0).sort((a, b) => a.playerName.localeCompare(b.playerName)),
+    [players],
+  )
+
   const hasStDates = isSpringTraining(startDate) || isSpringTraining(endDate)
   const hasNcaaDates = isNcaaSeason(startDate) || isNcaaSeason(endDate)
   const hasHsDates = isHsSeason(startDate) || isHsSeason(endDate)
@@ -36,6 +40,17 @@ export default function TripPlanner() {
     || (hasNcaaDates && hasNcaaPlayers)
     || (hasHsDates && hasHsPlayers)
   const canGenerate = hasData && players.length > 0 && !computing
+
+  function handlePriorityChange(slot: 0 | 1, value: string) {
+    const next = [...priorityPlayers]
+    if (value === '') {
+      next.splice(slot, 1)
+    } else {
+      next[slot] = value
+    }
+    // Remove duplicates and empty slots
+    setPriorityPlayers([...new Set(next.filter(Boolean))])
+  }
 
   return (
     <div className="space-y-6">
@@ -88,6 +103,40 @@ export default function TripPlanner() {
           </button>
         </div>
 
+        {/* Priority players */}
+        <div className="mt-4 rounded-lg border border-border/50 bg-gray-950/50 p-3">
+          <label className="mb-2 block text-xs font-medium text-text-dim">
+            Priority Players <span className="text-text-dim/50">(optional — build first trip around these players)</span>
+          </label>
+          <div className="flex flex-wrap gap-3">
+            {[0, 1].map((slot) => (
+              <select
+                key={slot}
+                value={priorityPlayers[slot] ?? ''}
+                onChange={(e) => handlePriorityChange(slot as 0 | 1, e.target.value)}
+                className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-text focus:border-accent-blue focus:outline-none"
+              >
+                <option value="">{slot === 0 ? 'Select player 1...' : 'Select player 2...'}</option>
+                {eligibleForPriority
+                  .filter((p) => p.playerName !== priorityPlayers[slot === 0 ? 1 : 0])
+                  .map((p) => (
+                    <option key={p.playerName} value={p.playerName}>
+                      {p.playerName} ({p.level} — {p.org})
+                    </option>
+                  ))}
+              </select>
+            ))}
+            {priorityPlayers.length > 0 && (
+              <button
+                onClick={() => setPriorityPlayers([])}
+                className="rounded-lg px-2 py-1 text-xs text-text-dim hover:text-text"
+              >
+                Clear
+              </button>
+            )}
+          </div>
+        </div>
+
         {!canGenerate && !computing && (
           <p className="mt-3 text-xs text-accent-orange">
             {players.length === 0
@@ -121,6 +170,33 @@ export default function TripPlanner() {
       {/* Results */}
       {tripPlan && (
         <>
+          {/* Priority player results */}
+          {tripPlan.priorityResults && tripPlan.priorityResults.length > 0 && (
+            <div className="rounded-xl border border-accent-blue/30 bg-accent-blue/5 p-4">
+              <h3 className="mb-2 text-sm font-semibold text-accent-blue">Priority Player Results</h3>
+              <div className="space-y-1.5">
+                {tripPlan.priorityResults.map((r) => (
+                  <div key={r.playerName} className="flex items-center gap-2 text-sm">
+                    <span className={`h-2 w-2 rounded-full ${
+                      r.status === 'included' ? 'bg-accent-green' :
+                      r.status === 'separate-trip' ? 'bg-accent-orange' :
+                      'bg-accent-red'
+                    }`} />
+                    <span className="font-medium text-text">{r.playerName}</span>
+                    <span className="text-xs text-text-dim">
+                      {r.status === 'included' && 'Included in Trip #1'}
+                      {r.status === 'separate-trip' && 'Separate trip created'}
+                      {r.status === 'unreachable' && 'Could not be reached'}
+                    </span>
+                    {r.reason && (
+                      <span className="text-[11px] text-accent-orange">— {r.reason}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Coverage stats */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <StatCard label="Trips Planned" value={tripPlan.trips.length} />

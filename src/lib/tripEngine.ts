@@ -1,8 +1,7 @@
 import type { Coordinates } from '../types/roster'
 import type { RosterPlayer } from '../types/roster'
-import type { GameEvent, TripCandidate, TripPlan, VisitConfidence } from '../types/schedule'
+import type { GameEvent, TripCandidate, TripPlan, PriorityResult, VisitConfidence } from '../types/schedule'
 import { TIER_VISIT_TARGETS } from '../types/roster'
-import { computeDriveTimes } from './routing'
 import { isSpringTraining, getSpringTrainingSite } from '../data/springTraining'
 import { resolveMLBTeamId, resolveNcaaName } from '../data/aliases'
 import { NCAA_VENUES } from '../data/ncaaVenues'
@@ -17,6 +16,33 @@ const TIER_WEIGHTS: Record<number, number> = {
   2: 3,
   3: 1,
   4: 0,
+}
+
+// Haversine distance in km between two coordinates
+function haversineKm(a: Coordinates, b: Coordinates): number {
+  const R = 6371
+  const dLat = ((b.lat - a.lat) * Math.PI) / 180
+  const dLng = ((b.lng - a.lng) * Math.PI) / 180
+  const sinLat = Math.sin(dLat / 2)
+  const sinLng = Math.sin(dLng / 2)
+  const h =
+    sinLat * sinLat +
+    Math.cos((a.lat * Math.PI) / 180) * Math.cos((b.lat * Math.PI) / 180) * sinLng * sinLng
+  return R * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h))
+}
+
+// Estimate drive time in minutes from straight-line distance
+// ~90 km/h avg speed with 1.3 detour factor (reasonable for Florida highway driving)
+function estimateDriveMinutes(a: Coordinates, b: Coordinates): number {
+  const km = haversineKm(a, b)
+  return Math.round((km * 1.3 / 90) * 60)
+}
+
+// Get ISO week number for venue-week deduplication
+function getWeekNumber(dateStr: string): number {
+  const d = new Date(dateStr + 'T12:00:00Z')
+  const yearStart = new Date(Date.UTC(d.getUTCFullYear(), 0, 1))
+  return Math.floor((d.getTime() - yearStart.getTime()) / (7 * 24 * 60 * 60 * 1000))
 }
 
 // Check if a date falls on Sunday (blackout)
@@ -43,26 +69,18 @@ function getDatesInRange(start: string, end: string): string[] {
   return dates
 }
 
-// Find Thursdays in a date range
-function getThursdays(start: string, end: string): string[] {
-  return getDatesInRange(start, end).filter((d) => {
-    const day = new Date(d + 'T12:00:00Z').getUTCDay()
-    return day === ANCHOR_DAY
-  })
-}
-
-// Get Wed-Sat window around a Thursday
-function getTripWindow(thursday: string): string[] {
-  const thu = new Date(thursday + 'T12:00:00Z')
-  const wed = new Date(thu)
-  wed.setUTCDate(wed.getUTCDate() - 1)
-  const sat = new Date(thu)
-  sat.setUTCDate(sat.getUTCDate() + 2)
+// Get trip window around any anchor day (day before through 2 days after, excluding Sundays)
+function getTripWindow(anchorDate: string): string[] {
+  const anchor = new Date(anchorDate + 'T12:00:00Z')
+  const dayBefore = new Date(anchor)
+  dayBefore.setUTCDate(dayBefore.getUTCDate() - 1)
+  const twoDaysAfter = new Date(anchor)
+  twoDaysAfter.setUTCDate(twoDaysAfter.getUTCDate() + 2)
 
   return getDatesInRange(
-    wed.toISOString().split('T')[0]!,
-    sat.toISOString().split('T')[0]!,
-  ).filter(isDateAllowed) // Exclude Sundays (shouldn't hit any in Wed-Sat but just in case)
+    dayBefore.toISOString().split('T')[0]!,
+    twoDaysAfter.toISOString().split('T')[0]!,
+  ).filter(isDateAllowed) // Exclude Sundays
 }
 
 // Score a trip candidate
@@ -293,34 +311,6 @@ function coordKey(c: Coordinates): string {
   return `${c.lat.toFixed(4)},${c.lng.toFixed(4)}`
 }
 
-// Pre-compute drive times from a single origin to all unique venues in one batch
-async function precomputeDistances(
-  origin: Coordinates,
-  games: GameEvent[],
-  onProgress?: (step: string, detail?: string) => void,
-): Promise<Map<string, number>> {
-  const uniqueVenues = new Map<string, Coordinates>()
-  for (const g of games) {
-    if (g.venue.coords.lat === 0 && g.venue.coords.lng === 0) continue
-    const key = coordKey(g.venue.coords)
-    if (!uniqueVenues.has(key)) uniqueVenues.set(key, g.venue.coords)
-  }
-
-  const venueEntries = [...uniqueVenues.entries()]
-  if (venueEntries.length === 0) return new Map()
-
-  onProgress?.('Pre-computing distances', `${venueEntries.length} unique venues from home base...`)
-
-  const coords = venueEntries.map(([, c]) => c)
-  const times = await computeDriveTimes(origin, coords)
-
-  const result = new Map<string, number>()
-  for (let i = 0; i < venueEntries.length; i++) {
-    result.set(venueEntries[i]![0], times[i]!)
-  }
-  return result
-}
-
 // Main trip generation algorithm
 export async function generateTrips(
   games: GameEvent[],
@@ -329,6 +319,7 @@ export async function generateTrips(
   endDate: string,
   onProgress?: (step: string, detail?: string) => void,
   maxDriveMinutes: number = MAX_DRIVE_MINUTES,
+  priorityPlayers: string[] = [],
 ): Promise<TripPlan> {
   onProgress?.('Preparing', 'Filtering eligible players...')
 
@@ -362,32 +353,46 @@ export async function generateTrips(
     }
   }
 
-  // Pre-compute ALL home-to-venue distances in one batch (instead of per-anchor)
-  const homeToVenue = await precomputeDistances(HOME_BASE, eligibleGames, onProgress)
+  // Pre-compute home-to-venue distances using Haversine (instant, no API needed)
+  const homeToVenue = new Map<string, number>()
+  for (const g of eligibleGames) {
+    if (g.venue.coords.lat === 0 && g.venue.coords.lng === 0) continue
+    const key = coordKey(g.venue.coords)
+    if (!homeToVenue.has(key)) {
+      homeToVenue.set(key, estimateDriveMinutes(HOME_BASE, g.venue.coords))
+    }
+  }
 
-  onProgress?.('Finding anchors', 'Identifying Thursday games...')
+  const uniqueVenueCount = homeToVenue.size
+  onProgress?.('Analyzing', `${eligibleGames.length} visit opportunities across ${uniqueVenueCount} venues...`)
 
-  // Find all Thursdays
-  const thursdays = getThursdays(startDate, endDate)
+  // Get ALL non-Sunday dates as potential anchor days (not just Thursdays)
+  const anchorDays = getDatesInRange(startDate, endDate).filter(isDateAllowed)
 
-  // Build trip candidates for each Thursday anchor
+  // Build trip candidates — any day can anchor a trip
+  // Deduplicate: only evaluate each venue once per week
   const candidates: TripCandidate[] = []
+  const seenVenueWeeks = new Set<string>()
 
-  for (const thursday of thursdays) {
-    const window = getTripWindow(thursday)
+  for (const anchorDay of anchorDays) {
+    const anchorGames = eligibleGames.filter((g) => g.date === anchorDay)
 
-    // Find games on this Thursday with eligible players
-    const thursdayGames = eligibleGames.filter((g) => g.date === thursday)
+    for (const anchor of anchorGames) {
+      if (anchor.venue.coords.lat === 0 && anchor.venue.coords.lng === 0) continue
 
-    for (const anchor of thursdayGames) {
-      // Check anchor reachable from Orlando using pre-computed distances
       const anchorKey = coordKey(anchor.venue.coords)
-      const homeToAnchor = homeToVenue.get(anchorKey) ?? -1
-      if (homeToAnchor < 0 || homeToAnchor > maxDriveMinutes) continue
+      const homeToAnchor = homeToVenue.get(anchorKey) ?? Infinity
+      if (homeToAnchor > maxDriveMinutes) continue
 
-      onProgress?.('Building candidates', `${anchor.venue.name} on ${thursday}`)
+      // Deduplicate: same venue within same week → skip
+      const weekNum = getWeekNumber(anchorDay)
+      const venueWeekKey = `${anchorKey}-w${weekNum}`
+      if (seenVenueWeeks.has(venueWeekKey)) continue
+      seenVenueWeeks.add(venueWeekKey)
 
-      // Find nearby games within the trip window
+      const window = getTripWindow(anchorDay)
+
+      // Find nearby games within the trip window at any venue
       const windowGames = eligibleGames.filter(
         (g) =>
           window.includes(g.date) &&
@@ -398,27 +403,23 @@ export async function generateTrips(
 
       if (windowGames.length === 0) {
         // Solo anchor trip
-        const visitedPlayers = anchor.playerNames.filter((n) => eligiblePlayers.has(n))
+        const visitedPlayersList = anchor.playerNames.filter((n) => eligiblePlayers.has(n))
         candidates.push({
           anchorGame: anchor,
           nearbyGames: [],
           suggestedDays: [anchor.date],
-          totalPlayersVisited: visitedPlayers.length,
-          visitValue: scoreTripCandidate(visitedPlayers, playerMap),
+          totalPlayersVisited: visitedPlayersList.length,
+          visitValue: scoreTripCandidate(visitedPlayersList, playerMap),
           driveFromHomeMinutes: homeToAnchor,
-          totalDriveMinutes: homeToAnchor * 2, // round trip
+          totalDriveMinutes: homeToAnchor * 2,
           venueCount: 1,
         })
         continue
       }
 
-      // Compute drive times from anchor to all window games
-      const candidateCoords = windowGames.map((g) => g.venue.coords)
-      const driveTimes = await computeDriveTimes(anchor.venue.coords, candidateCoords)
-
-      // Filter to within radius
+      // Use Haversine for nearby game distance estimation (instant, no API)
       const nearbyGames = windowGames
-        .map((g, i) => ({ ...g, driveMinutes: driveTimes[i]! }))
+        .map((g) => ({ ...g, driveMinutes: estimateDriveMinutes(anchor.venue.coords, g.venue.coords) }))
         .filter((g) => g.driveMinutes <= maxDriveMinutes && g.driveMinutes >= 0)
 
       // Collect all unique players visited
@@ -434,8 +435,7 @@ export async function generateTrips(
 
       const suggestedDays = [...new Set([anchor.date, ...nearbyGames.map((g) => g.date)])].sort()
 
-      // Estimate total driving: home→anchor + inter-venue hops + last venue→home
-      // Simplified: sum of anchor-to-nearby drives + 2x home-to-anchor for round trip
+      // Estimate total driving
       const interVenueDrive = nearbyGames.reduce((sum, g) => sum + g.driveMinutes, 0)
       const lastVenueKey = nearbyGames.length > 0
         ? coordKey(nearbyGames[nearbyGames.length - 1]!.venue.coords)
@@ -443,24 +443,128 @@ export async function generateTrips(
       const returnHome = homeToVenue.get(lastVenueKey) ?? homeToAnchor
       const totalDrive = homeToAnchor + interVenueDrive + returnHome
 
+      // Thursday bonus: prefer Thursday anchors with 20% value boost
+      const dayOfWeek = new Date(anchorDay + 'T12:00:00Z').getUTCDay()
+      const thursdayBonus = dayOfWeek === ANCHOR_DAY ? 1.2 : 1.0
+
       candidates.push({
         anchorGame: anchor,
         nearbyGames,
         suggestedDays,
         totalPlayersVisited: allPlayerNames.size,
-        visitValue: scoreTripCandidate([...allPlayerNames], playerMap),
+        visitValue: Math.round(scoreTripCandidate([...allPlayerNames], playerMap) * thursdayBonus),
         driveFromHomeMinutes: homeToAnchor,
         totalDriveMinutes: totalDrive,
-        venueCount: 1 + nearbyGames.length,
+        venueCount: 1 + new Set(nearbyGames.map((g) => coordKey(g.venue.coords))).size,
       })
     }
   }
 
-  onProgress?.('Optimizing', 'Selecting best trips...')
+  onProgress?.('Optimizing', `${candidates.length} trip candidates — selecting best trips...`)
 
-  // Greedy selection: pick highest-value trip, remove visited players, repeat
+  // --- Priority player handling ---
+  const priorityResults: PriorityResult[] = []
   const selectedTrips: TripCandidate[] = []
   const visitedPlayers = new Set<string>()
+
+  if (priorityPlayers.length > 0) {
+    onProgress?.('Priority', `Building trip around ${priorityPlayers.join(' & ')}...`)
+
+    // Helper: get all candidates containing a specific player
+    function candidatesWithPlayer(name: string): TripCandidate[] {
+      return candidates.filter((c) => {
+        const allNames = [
+          ...c.anchorGame.playerNames,
+          ...c.nearbyGames.flatMap((g) => g.playerNames),
+        ]
+        return allNames.includes(name)
+      })
+    }
+
+    if (priorityPlayers.length === 2) {
+      const [p1, p2] = priorityPlayers as [string, string]
+
+      // Try to find a trip that includes BOTH priority players
+      const bothCandidates = candidates.filter((c) => {
+        const allNames = new Set([
+          ...c.anchorGame.playerNames,
+          ...c.nearbyGames.flatMap((g) => g.playerNames),
+        ])
+        return allNames.has(p1) && allNames.has(p2)
+      })
+
+      if (bothCandidates.length > 0) {
+        // Found a trip with both — pick the highest value one
+        bothCandidates.sort((a, b) => b.visitValue - a.visitValue)
+        const best = bothCandidates[0]!
+        selectedTrips.push(best)
+        for (const name of best.anchorGame.playerNames) {
+          if (eligiblePlayers.has(name)) visitedPlayers.add(name)
+        }
+        for (const g of best.nearbyGames) {
+          for (const name of g.playerNames) {
+            if (eligiblePlayers.has(name)) visitedPlayers.add(name)
+          }
+        }
+        priorityResults.push({ playerName: p1, status: 'included' })
+        priorityResults.push({ playerName: p2, status: 'included' })
+      } else {
+        // Can't combine — build separate priority trips for each
+        for (const pName of [p1, p2]) {
+          const pCandidates = candidatesWithPlayer(pName)
+          if (pCandidates.length > 0) {
+            pCandidates.sort((a, b) => b.visitValue - a.visitValue)
+            const best = pCandidates[0]!
+            selectedTrips.push(best)
+            for (const name of best.anchorGame.playerNames) {
+              if (eligiblePlayers.has(name)) visitedPlayers.add(name)
+            }
+            for (const g of best.nearbyGames) {
+              for (const name of g.playerNames) {
+                if (eligiblePlayers.has(name)) visitedPlayers.add(name)
+              }
+            }
+            priorityResults.push({
+              playerName: pName,
+              status: 'separate-trip',
+              reason: `No trip covers both ${p1} and ${p2} within the drive radius — created separate trips`,
+            })
+          } else {
+            priorityResults.push({
+              playerName: pName,
+              status: 'unreachable',
+              reason: `No reachable games for ${pName} in the selected date range`,
+            })
+          }
+        }
+      }
+    } else if (priorityPlayers.length === 1) {
+      const pName = priorityPlayers[0]!
+      const pCandidates = candidatesWithPlayer(pName)
+      if (pCandidates.length > 0) {
+        pCandidates.sort((a, b) => b.visitValue - a.visitValue)
+        const best = pCandidates[0]!
+        selectedTrips.push(best)
+        for (const name of best.anchorGame.playerNames) {
+          if (eligiblePlayers.has(name)) visitedPlayers.add(name)
+        }
+        for (const g of best.nearbyGames) {
+          for (const name of g.playerNames) {
+            if (eligiblePlayers.has(name)) visitedPlayers.add(name)
+          }
+        }
+        priorityResults.push({ playerName: pName, status: 'included' })
+      } else {
+        priorityResults.push({
+          playerName: pName,
+          status: 'unreachable',
+          reason: `No reachable games for ${pName} in the selected date range`,
+        })
+      }
+    }
+  }
+
+  // --- Greedy selection for remaining trips ---
   const remainingCandidates = [...candidates].sort((a, b) => b.visitValue - a.visitValue)
 
   while (remainingCandidates.length > 0) {
@@ -508,6 +612,7 @@ export async function generateTrips(
     totalPlayersWithVisits: totalCovered,
     totalVisitsCovered: totalCovered,
     coveragePercent: totalTarget > 0 ? Math.round((totalCovered / eligiblePlayers.size) * 100) : 0,
+    priorityResults: priorityResults.length > 0 ? priorityResults : undefined,
   }
 }
 
