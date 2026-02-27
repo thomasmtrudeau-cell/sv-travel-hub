@@ -1,31 +1,34 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useScheduleStore } from '../../store/scheduleStore'
-import { useRosterStore, selectProPlayers } from '../../store/rosterStore'
+import { useRosterStore } from '../../store/rosterStore'
 import { resolveMLBTeamId } from '../../data/aliases'
 import type { MLBAffiliate } from '../../lib/mlbApi'
 import ScheduleCalendar from './ScheduleCalendar'
 
 export default function ScheduleView() {
-  const proPlayers = useRosterStore(selectProPlayers)
-  const {
-    affiliates,
-    affiliatesLoading,
-    affiliatesError,
-    playerTeamAssignments,
-    proGames,
-    schedulesLoading,
-    schedulesProgress,
-    schedulesError,
-    fetchAffiliates,
-    assignPlayerToTeam,
-    fetchProSchedules,
-  } = useScheduleStore()
+  const players = useRosterStore((s) => s.players)
+  const proPlayers = players.filter((p) => p.level === 'Pro')
+
+  const affiliates = useScheduleStore((s) => s.affiliates)
+  const affiliatesLoading = useScheduleStore((s) => s.affiliatesLoading)
+  const affiliatesError = useScheduleStore((s) => s.affiliatesError)
+  const playerTeamAssignments = useScheduleStore((s) => s.playerTeamAssignments)
+  const proGames = useScheduleStore((s) => s.proGames)
+  const schedulesLoading = useScheduleStore((s) => s.schedulesLoading)
+  const schedulesProgress = useScheduleStore((s) => s.schedulesProgress)
+  const schedulesError = useScheduleStore((s) => s.schedulesError)
+  const fetchAffiliates = useScheduleStore((s) => s.fetchAffiliates)
+  const assignPlayerToTeam = useScheduleStore((s) => s.assignPlayerToTeam)
+  const fetchProSchedules = useScheduleStore((s) => s.fetchProSchedules)
 
   const [startDate, setStartDate] = useState('2026-03-01')
   const [endDate, setEndDate] = useState('2026-09-30')
 
+  const initialized = useRef(false)
   useEffect(() => {
+    if (initialized.current) return
     if (affiliates.length === 0 && !affiliatesLoading) {
+      initialized.current = true
       fetchAffiliates()
     }
   }, [affiliates.length, affiliatesLoading, fetchAffiliates])

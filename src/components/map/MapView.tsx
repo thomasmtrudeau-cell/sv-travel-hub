@@ -4,12 +4,10 @@ import { useScheduleStore } from '../../store/scheduleStore'
 import { useTripStore } from '../../store/tripStore'
 import { HOME_BASE } from '../../lib/tripEngine'
 
-// Leaflet CSS will be loaded dynamically
-let L: typeof import('leaflet') | null = null
-
 export default function MapView() {
   const mapRef = useRef<HTMLDivElement>(null)
-  const mapInstance = useRef<L.Map | null>(null)
+  const mapInstance = useRef<import('leaflet').Map | null>(null)
+  const leafletRef = useRef<typeof import('leaflet') | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [showPro, setShowPro] = useState(true)
   const [showNcaa, setShowNcaa] = useState(true)
@@ -20,15 +18,21 @@ export default function MapView() {
   const proGames = useScheduleStore((s) => s.proGames)
   const tripPlan = useTripStore((s) => s.tripPlan)
   const loadNcaaVenues = useVenueStore((s) => s.loadNcaaVenues)
+  const addProVenue = useVenueStore((s) => s.addProVenue)
 
-  // Load NCAA venues on mount
+  // Load NCAA venues once
+  const ncaaLoaded = useRef(false)
   useEffect(() => {
+    if (ncaaLoaded.current) return
+    ncaaLoaded.current = true
     loadNcaaVenues()
   }, [loadNcaaVenues])
 
   // Add pro venues from schedule data
-  const addProVenue = useVenueStore((s) => s.addProVenue)
+  const lastProGamesLen = useRef(0)
   useEffect(() => {
+    if (proGames.length === lastProGamesLen.current) return
+    lastProGamesLen.current = proGames.length
     for (const game of proGames) {
       const key = `pro-${game.venue.name.toLowerCase().replace(/\s+/g, '-')}`
       addProVenue(key, game.venue.name, game.venue.coords)
@@ -36,15 +40,16 @@ export default function MapView() {
   }, [proGames, addProVenue])
 
   // Initialize Leaflet
+  const mapInitialized = useRef(false)
   useEffect(() => {
+    if (mapInitialized.current) return
+    mapInitialized.current = true
+
     let cancelled = false
 
     async function init() {
-      if (mapInstance.current) return
-
-      // Dynamic import
-      const leaflet = await import('leaflet')
-      L = leaflet
+      const L = await import('leaflet')
+      leafletRef.current = L
 
       // Add CSS
       if (!document.querySelector('link[href*="leaflet"]')) {
@@ -73,13 +78,14 @@ export default function MapView() {
 
   // Update markers when data/filters change
   useEffect(() => {
+    const L = leafletRef.current
     if (!mapInstance.current || !L || !loaded) return
 
     const map = mapInstance.current
 
-    // Clear existing markers (simple approach)
+    // Clear existing markers
     map.eachLayer((layer) => {
-      if (layer instanceof L!.Marker || layer instanceof L!.Polyline || layer instanceof L!.Circle) {
+      if (layer instanceof L.Marker || layer instanceof L.Polyline || layer instanceof L.Circle) {
         map.removeLayer(layer)
       }
     })
@@ -142,7 +148,7 @@ export default function MapView() {
 
         // 3hr radius circle around anchor
         L.circle([trip.anchorGame.venue.coords.lat, trip.anchorGame.venue.coords.lng], {
-          radius: 240000, // ~150 miles ≈ 3hr drive approximation
+          radius: 240000,
           color: '#a78bfa',
           weight: 1,
           opacity: 0.3,
@@ -150,7 +156,7 @@ export default function MapView() {
         }).addTo(map)
       }
     }
-  }, [venues, proGames, tripPlan, showPro, showNcaa, showHs, showTrips, loaded])
+  }, [venues, tripPlan, showPro, showNcaa, showHs, showTrips, loaded])
 
   return (
     <div className="space-y-4">

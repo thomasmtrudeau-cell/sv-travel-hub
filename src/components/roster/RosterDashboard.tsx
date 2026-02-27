@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { useRosterStore, selectRosterStats } from '../../store/rosterStore'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useRosterStore } from '../../store/rosterStore'
 import type { RosterPlayer, PlayerLevel } from '../../types/roster'
 import PlayerCard from './PlayerCard'
 
@@ -7,16 +7,32 @@ type SortField = 'playerName' | 'tier' | 'visitsRemaining' | 'org'
 type SortDir = 'asc' | 'desc'
 
 export default function RosterDashboard() {
-  const { players, loading, error, lastFetchedAt, fetchRoster } = useRosterStore()
-  const stats = useRosterStore(selectRosterStats)
+  const players = useRosterStore((s) => s.players)
+  const loading = useRosterStore((s) => s.loading)
+  const error = useRosterStore((s) => s.error)
+  const lastFetchedAt = useRosterStore((s) => s.lastFetchedAt)
+  const fetchRoster = useRosterStore((s) => s.fetchRoster)
+
   const [levelFilter, setLevelFilter] = useState<PlayerLevel | 'All'>('All')
   const [sortField, setSortField] = useState<SortField>('tier')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [search, setSearch] = useState('')
 
+  const initialized = useRef(false)
   useEffect(() => {
+    if (initialized.current) return
+    initialized.current = true
     fetchRoster()
   }, [fetchRoster])
+
+  const stats = useMemo(() => {
+    const total = players.length
+    const totalTarget = players.reduce((sum, p) => sum + p.visitTarget2026, 0)
+    const totalCompleted = players.reduce((sum, p) => sum + p.visitsCompleted, 0)
+    const coveragePercent = totalTarget > 0 ? Math.round((totalCompleted / totalTarget) * 100) : 0
+    const needingVisits = players.filter((p) => p.visitsRemaining > 0).length
+    return { total, totalTarget, totalCompleted, coveragePercent, needingVisits }
+  }, [players])
 
   const filtered = players
     .filter((p) => levelFilter === 'All' || p.level === levelFilter)

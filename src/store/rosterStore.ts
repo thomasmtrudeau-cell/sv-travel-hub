@@ -27,25 +27,3 @@ export const useRosterStore = create<RosterState>((set) => ({
   },
 }))
 
-// Derived selectors
-export const selectProPlayers = (state: RosterState) =>
-  state.players.filter((p) => p.level === 'Pro')
-
-export const selectNcaaPlayers = (state: RosterState) =>
-  state.players.filter((p) => p.level === 'NCAA')
-
-export const selectHsPlayers = (state: RosterState) =>
-  state.players.filter((p) => p.level === 'HS')
-
-export const selectPlayersNeedingVisits = (state: RosterState) =>
-  state.players.filter((p) => p.visitsRemaining > 0)
-
-export const selectRosterStats = (state: RosterState) => {
-  const total = state.players.length
-  const totalTarget = state.players.reduce((sum, p) => sum + p.visitTarget2026, 0)
-  const totalCompleted = state.players.reduce((sum, p) => sum + p.visitsCompleted, 0)
-  const coveragePercent = totalTarget > 0 ? Math.round((totalCompleted / totalTarget) * 100) : 0
-  const needingVisits = state.players.filter((p) => p.visitsRemaining > 0).length
-
-  return { total, totalTarget, totalCompleted, coveragePercent, needingVisits }
-}
