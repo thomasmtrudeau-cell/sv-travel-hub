@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useVenueStore } from '../../store/venueStore'
+import { useRosterStore } from '../../store/rosterStore'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useTripStore } from '../../store/tripStore'
 import { HOME_BASE } from '../../lib/tripEngine'
@@ -10,23 +11,44 @@ export default function MapView() {
   const leafletRef = useRef<typeof import('leaflet') | null>(null)
   const [loaded, setLoaded] = useState(false)
   const [showPro, setShowPro] = useState(true)
+  const [showSt, setShowSt] = useState(true)
   const [showNcaa, setShowNcaa] = useState(true)
   const [showHs, setShowHs] = useState(true)
   const [showTrips, setShowTrips] = useState(true)
 
   const venues = useVenueStore((s) => s.venues)
+  const hsGeocodingProgress = useVenueStore((s) => s.hsGeocodingProgress)
   const proGames = useScheduleStore((s) => s.proGames)
   const tripPlan = useTripStore((s) => s.tripPlan)
+  const players = useRosterStore((s) => s.players)
   const loadNcaaVenues = useVenueStore((s) => s.loadNcaaVenues)
+  const loadSpringTrainingVenues = useVenueStore((s) => s.loadSpringTrainingVenues)
   const addProVenue = useVenueStore((s) => s.addProVenue)
+  const geocodeHsVenues = useVenueStore((s) => s.geocodeHsVenues)
 
-  // Load NCAA venues once
-  const ncaaLoaded = useRef(false)
+  // Load NCAA + Spring Training venues once
+  const venuesLoaded = useRef(false)
   useEffect(() => {
-    if (ncaaLoaded.current) return
-    ncaaLoaded.current = true
+    if (venuesLoaded.current) return
+    venuesLoaded.current = true
     loadNcaaVenues()
-  }, [loadNcaaVenues])
+    loadSpringTrainingVenues()
+  }, [loadNcaaVenues, loadSpringTrainingVenues])
+
+  // Geocode HS venues once when players are available
+  const hsGeocodeStarted = useRef(false)
+  useEffect(() => {
+    if (hsGeocodeStarted.current) return
+    const hsPlayers = players.filter((p) => p.level === 'HS')
+    if (hsPlayers.length === 0) return
+    hsGeocodeStarted.current = true
+    const schools = hsPlayers.map((p) => ({
+      schoolName: p.org,
+      city: '',
+      state: p.state,
+    }))
+    geocodeHsVenues(schools)
+  }, [players, geocodeHsVenues])
 
   // Add pro venues from schedule data
   const lastProGamesLen = useRef(0)
@@ -104,20 +126,23 @@ export default function MapView() {
     // Venue markers
     for (const [key, venue] of Object.entries(venues)) {
       const isPro = venue.source === 'mlb-api'
+      const isSt = venue.source === 'spring-training'
       const isNcaa = venue.source === 'ncaa-hardcoded'
       const isHs = venue.source === 'hs-geocoded'
 
       if (isPro && !showPro) continue
+      if (isSt && !showSt) continue
       if (isNcaa && !showNcaa) continue
       if (isHs && !showHs) continue
 
-      const color = isPro ? '#60a5fa' : isNcaa ? '#34d399' : '#fb923c'
+      const color = isPro ? '#60a5fa' : isSt ? '#f472b6' : isNcaa ? '#34d399' : '#fb923c'
+      const size = isSt ? 12 : 10
 
       const icon = L.divIcon({
-        html: `<div style="width:10px;height:10px;border-radius:50%;background:${color};border:2px solid ${color}44;"></div>`,
+        html: `<div style="width:${size}px;height:${size}px;border-radius:50%;background:${color};border:2px solid ${color}44;"></div>`,
         className: '',
-        iconSize: [10, 10],
-        iconAnchor: [5, 5],
+        iconSize: [size, size],
+        iconAnchor: [size / 2, size / 2],
       })
 
       L.marker([venue.coords.lat, venue.coords.lng], { icon })
@@ -156,13 +181,14 @@ export default function MapView() {
         }).addTo(map)
       }
     }
-  }, [venues, tripPlan, showPro, showNcaa, showHs, showTrips, loaded])
+  }, [venues, tripPlan, showPro, showSt, showNcaa, showHs, showTrips, loaded])
 
   return (
     <div className="space-y-4">
       {/* Layer toggles */}
       <div className="flex flex-wrap gap-3 rounded-xl border border-border bg-surface p-3">
         <Toggle label="Pro Venues" color="bg-accent-blue" checked={showPro} onChange={setShowPro} />
+        <Toggle label="Spring Training" color="bg-pink-500" checked={showSt} onChange={setShowSt} />
         <Toggle label="NCAA Venues" color="bg-accent-green" checked={showNcaa} onChange={setShowNcaa} />
         <Toggle label="HS Venues" color="bg-accent-orange" checked={showHs} onChange={setShowHs} />
         <Toggle label="Trip Routes" color="bg-accent-purple" checked={showTrips} onChange={setShowTrips} />
@@ -173,7 +199,13 @@ export default function MapView() {
         <div ref={mapRef} className="h-[600px] w-full bg-gray-900" />
       </div>
 
-      {/* Venue count */}
+      {/* Geocoding progress + venue count */}
+      {hsGeocodingProgress && (
+        <div className="flex items-center gap-2 text-xs text-text-dim">
+          <span className="h-3 w-3 animate-spin rounded-full border border-text-dim border-t-transparent" />
+          Geocoding HS venues: {hsGeocodingProgress.completed}/{hsGeocodingProgress.total}
+        </div>
+      )}
       <p className="text-xs text-text-dim">
         {Object.keys(venues).length} venues loaded
       </p>

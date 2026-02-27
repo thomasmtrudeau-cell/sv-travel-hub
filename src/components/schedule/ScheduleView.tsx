@@ -45,6 +45,8 @@ export default function ScheduleView() {
   const assignedCount = Object.keys(playerTeamAssignments).length
   const unassigned = proPlayers.filter((p) => !playerTeamAssignments[p.playerName])
 
+  const isStActive = isSpringTraining(new Date().toISOString().slice(0, 10))
+
   return (
     <div className="space-y-6">
       {/* Assignment section */}
@@ -54,6 +56,12 @@ export default function ScheduleView() {
             <h2 className="text-base font-semibold text-text">Player Team Assignments</h2>
             <p className="text-xs text-text-dim">
               Assign each Pro player to their current MiLB/MLB team ({assignedCount}/{proPlayers.length} assigned)
+              {isStActive && (
+                <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-accent-orange/15 px-2 py-0.5 text-[10px] font-medium text-accent-orange">
+                  <span className="h-1.5 w-1.5 rounded-full bg-accent-orange" />
+                  Spring Training Active — see ST locations below
+                </span>
+              )}
             </p>
           </div>
           {affiliatesLoading && (

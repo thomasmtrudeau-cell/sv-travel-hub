@@ -1,12 +1,15 @@
 import { create } from 'zustand'
 import type { Coordinates } from '../types/roster'
 import { NCAA_VENUES } from '../data/ncaaVenues'
+import { SPRING_TRAINING_SITES } from '../data/springTraining'
 import { geocodeAllHsVenues } from '../lib/geocoding'
+
+type VenueSource = 'mlb-api' | 'ncaa-hardcoded' | 'hs-geocoded' | 'spring-training'
 
 interface VenueInfo {
   name: string
   coords: Coordinates
-  source: 'mlb-api' | 'ncaa-hardcoded' | 'hs-geocoded'
+  source: VenueSource
 }
 
 interface VenueState {
@@ -15,6 +18,7 @@ interface VenueState {
   hsGeocodingError: string | null
 
   loadNcaaVenues: () => void
+  loadSpringTrainingVenues: () => void
   addProVenue: (key: string, name: string, coords: Coordinates) => void
   geocodeHsVenues: (schools: Array<{ schoolName: string; city: string; state: string }>) => Promise<void>
   getVenue: (key: string) => VenueInfo | undefined
@@ -32,6 +36,19 @@ export const useVenueStore = create<VenueState>((set, get) => ({
         name: data.venueName,
         coords: data.coords,
         source: 'ncaa-hardcoded',
+      }
+    }
+    set({ venues })
+  },
+
+  loadSpringTrainingVenues: () => {
+    const venues = { ...get().venues }
+    for (const [teamId, site] of Object.entries(SPRING_TRAINING_SITES)) {
+      const key = `st-${teamId}`
+      venues[key] = {
+        name: site.venueName,
+        coords: site.coords,
+        source: 'spring-training',
       }
     }
     set({ venues })
