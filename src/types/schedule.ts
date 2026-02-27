@@ -30,6 +30,9 @@ export interface TripCandidate {
   suggestedDays: string[] // ISO dates
   totalPlayersVisited: number
   visitValue: number // tier-weighted score
+  driveFromHomeMinutes: number // Orlando → anchor drive time
+  totalDriveMinutes: number // estimated total driving (round trip)
+  venueCount: number // number of distinct venues visited
 }
 
 export interface TripPlan {

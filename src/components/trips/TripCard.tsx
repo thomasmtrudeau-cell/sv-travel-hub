@@ -16,6 +16,14 @@ export default function TripCard({ trip, index }: Props) {
     (trip.anchorGame.confidence && trip.anchorGame.confidence !== 'high') ||
     trip.nearbyGames.some((g) => g.confidence && g.confidence !== 'high')
 
+  const totalHours = Math.floor(trip.totalDriveMinutes / 60)
+  const totalMins = trip.totalDriveMinutes % 60
+  const homeHours = Math.floor(trip.driveFromHomeMinutes / 60)
+  const homeMins = trip.driveFromHomeMinutes % 60
+  const efficiency = trip.totalDriveMinutes > 0
+    ? (trip.visitValue / (trip.totalDriveMinutes / 60)).toFixed(1)
+    : '—'
+
   return (
     <div className="rounded-xl border border-border bg-surface p-5">
       <div className="mb-3 flex items-start justify-between">
@@ -32,6 +40,25 @@ export default function TripCard({ trip, index }: Props) {
           <span className="text-lg font-bold text-accent-blue">{trip.visitValue}</span>
           <p className="text-xs text-text-dim">visit value</p>
         </div>
+      </div>
+
+      {/* Trip logistics summary */}
+      <div className="mb-3 flex flex-wrap gap-3 rounded-lg bg-gray-950/50 px-3 py-2 text-[11px]">
+        <span className="text-text-dim">
+          {homeHours}h{homeMins > 0 ? ` ${homeMins}m` : ''} from Orlando
+        </span>
+        <span className="text-text-dim/30">|</span>
+        <span className="text-text-dim">
+          {totalHours}h{totalMins > 0 ? ` ${totalMins}m` : ''} total driving
+        </span>
+        <span className="text-text-dim/30">|</span>
+        <span className="text-text-dim">
+          {trip.venueCount} venue{trip.venueCount !== 1 ? 's' : ''}
+        </span>
+        <span className="text-text-dim/30">|</span>
+        <span className={`${parseFloat(efficiency) >= 5 ? 'text-accent-green' : parseFloat(efficiency) >= 2 ? 'text-accent-orange' : 'text-accent-red'}`}>
+          {efficiency} pts/hr
+        </span>
       </div>
 
       {/* Itinerary */}

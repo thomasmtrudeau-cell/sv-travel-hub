@@ -6,7 +6,16 @@ import { isNcaaSeason, isHsSeason } from '../../lib/tripEngine'
 import TripCard from './TripCard'
 
 export default function TripPlanner() {
-  const { startDate, endDate, tripPlan, computing, progressStep, progressDetail, setDateRange, generateTrips } = useTripStore()
+  const startDate = useTripStore((s) => s.startDate)
+  const endDate = useTripStore((s) => s.endDate)
+  const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
+  const tripPlan = useTripStore((s) => s.tripPlan)
+  const computing = useTripStore((s) => s.computing)
+  const progressStep = useTripStore((s) => s.progressStep)
+  const progressDetail = useTripStore((s) => s.progressDetail)
+  const setDateRange = useTripStore((s) => s.setDateRange)
+  const setMaxDriveMinutes = useTripStore((s) => s.setMaxDriveMinutes)
+  const generateTrips = useTripStore((s) => s.generateTrips)
   const proGames = useScheduleStore((s) => s.proGames)
   const players = useRosterStore((s) => s.players)
 
@@ -34,7 +43,7 @@ export default function TripPlanner() {
       <div className="rounded-xl border border-border bg-surface p-5">
         <h2 className="mb-3 text-base font-semibold text-text">Trip Planner</h2>
         <p className="mb-4 text-xs text-text-dim">
-          Generate optimized multi-day road trips anchored around Thursday games within 3hr driving radius of each venue.
+          Generate optimized multi-day road trips anchored around Thursday games within driving radius of each venue.
         </p>
 
         <div className="flex flex-wrap items-end gap-3">
@@ -54,6 +63,20 @@ export default function TripPlanner() {
               value={endDate}
               onChange={(e) => setDateRange(startDate, e.target.value)}
               className="rounded-lg border border-border bg-gray-950 px-3 py-1.5 text-sm text-text"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs text-text-dim">
+              Max Drive: {Math.floor(maxDriveMinutes / 60)}h{maxDriveMinutes % 60 > 0 ? ` ${maxDriveMinutes % 60}m` : ''}
+            </label>
+            <input
+              type="range"
+              min={120}
+              max={300}
+              step={15}
+              value={maxDriveMinutes}
+              onChange={(e) => setMaxDriveMinutes(parseInt(e.target.value))}
+              className="h-1.5 w-32 cursor-pointer appearance-none rounded-full bg-gray-700 accent-accent-blue"
             />
           </div>
           <button
@@ -120,7 +143,8 @@ export default function TripPlanner() {
                 Unreachable Players ({tripPlan.unvisitablePlayers.length})
               </h3>
               <p className="mb-3 text-xs text-text-dim">
-                These players have no games within the 3hr driving radius during the selected window.
+                These players have no games within the {Math.floor(maxDriveMinutes / 60)}h{maxDriveMinutes % 60 > 0 ? ` ${maxDriveMinutes % 60}m` : ''} driving radius during the selected window.
+                Try increasing the drive radius slider above.
               </p>
               <div className="flex flex-wrap gap-2">
                 {tripPlan.unvisitablePlayers.map((name) => (

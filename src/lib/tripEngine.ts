@@ -288,6 +288,39 @@ export function generateHsEvents(
 export { NCAA_SEASON_START, NCAA_SEASON_END, HS_SEASON_START, HS_SEASON_END }
 export { isNcaaSeason, isHsSeason }
 
+// Deduplicate coordinates by rounding to 4 decimal places (~11m precision)
+function coordKey(c: Coordinates): string {
+  return `${c.lat.toFixed(4)},${c.lng.toFixed(4)}`
+}
+
+// Pre-compute drive times from a single origin to all unique venues in one batch
+async function precomputeDistances(
+  origin: Coordinates,
+  games: GameEvent[],
+  onProgress?: (step: string, detail?: string) => void,
+): Promise<Map<string, number>> {
+  const uniqueVenues = new Map<string, Coordinates>()
+  for (const g of games) {
+    if (g.venue.coords.lat === 0 && g.venue.coords.lng === 0) continue
+    const key = coordKey(g.venue.coords)
+    if (!uniqueVenues.has(key)) uniqueVenues.set(key, g.venue.coords)
+  }
+
+  const venueEntries = [...uniqueVenues.entries()]
+  if (venueEntries.length === 0) return new Map()
+
+  onProgress?.('Pre-computing distances', `${venueEntries.length} unique venues from home base...`)
+
+  const coords = venueEntries.map(([, c]) => c)
+  const times = await computeDriveTimes(origin, coords)
+
+  const result = new Map<string, number>()
+  for (let i = 0; i < venueEntries.length; i++) {
+    result.set(venueEntries[i]![0], times[i]!)
+  }
+  return result
+}
+
 // Main trip generation algorithm
 export async function generateTrips(
   games: GameEvent[],
@@ -295,6 +328,7 @@ export async function generateTrips(
   startDate: string,
   endDate: string,
   onProgress?: (step: string, detail?: string) => void,
+  maxDriveMinutes: number = MAX_DRIVE_MINUTES,
 ): Promise<TripPlan> {
   onProgress?.('Preparing', 'Filtering eligible players...')
 
@@ -328,6 +362,9 @@ export async function generateTrips(
     }
   }
 
+  // Pre-compute ALL home-to-venue distances in one batch (instead of per-anchor)
+  const homeToVenue = await precomputeDistances(HOME_BASE, eligibleGames, onProgress)
+
   onProgress?.('Finding anchors', 'Identifying Thursday games...')
 
   // Find all Thursdays
@@ -343,7 +380,12 @@ export async function generateTrips(
     const thursdayGames = eligibleGames.filter((g) => g.date === thursday)
 
     for (const anchor of thursdayGames) {
-      onProgress?.('Computing drive times', `Anchor: ${anchor.venue.name} on ${thursday}`)
+      // Check anchor reachable from Orlando using pre-computed distances
+      const anchorKey = coordKey(anchor.venue.coords)
+      const homeToAnchor = homeToVenue.get(anchorKey) ?? -1
+      if (homeToAnchor < 0 || homeToAnchor > maxDriveMinutes) continue
+
+      onProgress?.('Building candidates', `${anchor.venue.name} on ${thursday}`)
 
       // Find nearby games within the trip window
       const windowGames = eligibleGames.filter(
@@ -356,17 +398,17 @@ export async function generateTrips(
 
       if (windowGames.length === 0) {
         // Solo anchor trip
-        const driveFromHome = await computeDriveTimes(HOME_BASE, [anchor.venue.coords])
-        if (driveFromHome[0]! <= MAX_DRIVE_MINUTES) {
-          const visitedPlayers = anchor.playerNames.filter((n) => eligiblePlayers.has(n))
-          candidates.push({
-            anchorGame: anchor,
-            nearbyGames: [],
-            suggestedDays: [anchor.date],
-            totalPlayersVisited: visitedPlayers.length,
-            visitValue: scoreTripCandidate(visitedPlayers, playerMap),
-          })
-        }
+        const visitedPlayers = anchor.playerNames.filter((n) => eligiblePlayers.has(n))
+        candidates.push({
+          anchorGame: anchor,
+          nearbyGames: [],
+          suggestedDays: [anchor.date],
+          totalPlayersVisited: visitedPlayers.length,
+          visitValue: scoreTripCandidate(visitedPlayers, playerMap),
+          driveFromHomeMinutes: homeToAnchor,
+          totalDriveMinutes: homeToAnchor * 2, // round trip
+          venueCount: 1,
+        })
         continue
       }
 
@@ -374,14 +416,10 @@ export async function generateTrips(
       const candidateCoords = windowGames.map((g) => g.venue.coords)
       const driveTimes = await computeDriveTimes(anchor.venue.coords, candidateCoords)
 
-      // Filter to within 3hr radius
+      // Filter to within radius
       const nearbyGames = windowGames
         .map((g, i) => ({ ...g, driveMinutes: driveTimes[i]! }))
-        .filter((g) => g.driveMinutes <= MAX_DRIVE_MINUTES && g.driveMinutes >= 0)
-
-      // Also check anchor is reachable from Orlando
-      const driveFromHome = await computeDriveTimes(HOME_BASE, [anchor.venue.coords])
-      if (driveFromHome[0]! > MAX_DRIVE_MINUTES) continue
+        .filter((g) => g.driveMinutes <= maxDriveMinutes && g.driveMinutes >= 0)
 
       // Collect all unique players visited
       const allPlayerNames = new Set<string>()
@@ -396,12 +434,24 @@ export async function generateTrips(
 
       const suggestedDays = [...new Set([anchor.date, ...nearbyGames.map((g) => g.date)])].sort()
 
+      // Estimate total driving: home→anchor + inter-venue hops + last venue→home
+      // Simplified: sum of anchor-to-nearby drives + 2x home-to-anchor for round trip
+      const interVenueDrive = nearbyGames.reduce((sum, g) => sum + g.driveMinutes, 0)
+      const lastVenueKey = nearbyGames.length > 0
+        ? coordKey(nearbyGames[nearbyGames.length - 1]!.venue.coords)
+        : anchorKey
+      const returnHome = homeToVenue.get(lastVenueKey) ?? homeToAnchor
+      const totalDrive = homeToAnchor + interVenueDrive + returnHome
+
       candidates.push({
         anchorGame: anchor,
         nearbyGames,
         suggestedDays,
         totalPlayersVisited: allPlayerNames.size,
         visitValue: scoreTripCandidate([...allPlayerNames], playerMap),
+        driveFromHomeMinutes: homeToAnchor,
+        totalDriveMinutes: totalDrive,
+        venueCount: 1 + nearbyGames.length,
       })
     }
   }

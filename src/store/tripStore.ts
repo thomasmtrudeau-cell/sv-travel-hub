@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { Coordinates } from '../types/roster'
 import type { TripPlan } from '../types/schedule'
-import { generateTrips, generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents } from '../lib/tripEngine'
+import { generateTrips, generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, MAX_DRIVE_MINUTES } from '../lib/tripEngine'
 import { useRosterStore } from './rosterStore'
 import { useScheduleStore } from './scheduleStore'
 import { useVenueStore } from './venueStore'
@@ -9,27 +9,31 @@ import { useVenueStore } from './venueStore'
 interface TripState {
   startDate: string
   endDate: string
+  maxDriveMinutes: number
   tripPlan: TripPlan | null
   computing: boolean
   progressStep: string
   progressDetail: string
 
   setDateRange: (start: string, end: string) => void
+  setMaxDriveMinutes: (minutes: number) => void
   generateTrips: () => Promise<void>
 }
 
 export const useTripStore = create<TripState>((set, get) => ({
   startDate: '2026-03-01',
   endDate: '2026-09-30',
+  maxDriveMinutes: MAX_DRIVE_MINUTES,
   tripPlan: null,
   computing: false,
   progressStep: '',
   progressDetail: '',
 
   setDateRange: (startDate, endDate) => set({ startDate, endDate }),
+  setMaxDriveMinutes: (maxDriveMinutes) => set({ maxDriveMinutes }),
 
   generateTrips: async () => {
-    const { startDate, endDate } = get()
+    const { startDate, endDate, maxDriveMinutes } = get()
     const players = useRosterStore.getState().players
     const scheduledGames = useScheduleStore.getState().proGames
 
@@ -59,6 +63,7 @@ export const useTripStore = create<TripState>((set, get) => ({
         startDate,
         endDate,
         (step, detail) => set({ progressStep: step, progressDetail: detail ?? '' }),
+        maxDriveMinutes,
       )
       set({ tripPlan: plan, computing: false, progressStep: '', progressDetail: '' })
     } catch (e) {
