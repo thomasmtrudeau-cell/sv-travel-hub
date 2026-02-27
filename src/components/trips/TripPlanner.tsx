@@ -199,10 +199,10 @@ export default function TripPlanner() {
 
           {/* Coverage stats */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <StatCard label="Trips Planned" value={tripPlan.trips.length} />
-            <StatCard label="Players Covered" value={tripPlan.totalPlayersWithVisits} />
-            <StatCard label="Coverage" value={`${tripPlan.coveragePercent}%`} accent={tripPlan.coveragePercent >= 70 ? 'green' : 'orange'} />
-            <StatCard label="Unreachable" value={tripPlan.unvisitablePlayers.length} accent={tripPlan.unvisitablePlayers.length > 0 ? 'red' : 'green'} />
+            <StatCard label="Road Trips" value={tripPlan.trips.length} />
+            <StatCard label="Players Reachable" value={tripPlan.totalPlayersWithVisits} />
+            <StatCard label="Player Coverage" value={`${tripPlan.coveragePercent}%`} accent={tripPlan.coveragePercent >= 70 ? 'green' : 'orange'} />
+            <StatCard label="Not Reachable" value={tripPlan.unvisitablePlayers.length} accent={tripPlan.unvisitablePlayers.length > 0 ? 'red' : 'green'} />
           </div>
 
           {/* Trip cards */}
