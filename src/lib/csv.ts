@@ -67,7 +67,7 @@ export async function fetchRoster(): Promise<RosterPlayer[]> {
         normalizedName: normalizeName(playerName),
         org: findColumn(r, ['Org', 'Organization', 'Team', 'School']),
         level: parseLevel(findColumn(r, ['Level', 'Player Level'])),
-        mlbId: parseNumber(findColumn(r, ['MLB_ID', 'MLB Id', 'MLB ID', 'MLBId', 'MLB Team Id'])),
+        mlbPlayerId: parseNumber(findColumn(r, ['MLB_ID', 'MLB Id', 'MLB ID', 'MLBId'])),
         position: findColumn(r, ['Position', 'Pos']),
         state: findColumn(r, ['State', 'Home State']),
         draftClass: findColumn(r, ['Draft Class', 'Class', 'Draft Year']),

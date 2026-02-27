@@ -10,7 +10,7 @@ export interface RosterPlayer {
   normalizedName: string
   org: string
   level: PlayerLevel
-  mlbId: number | null // MLB parent org team ID (Pro players only)
+  mlbPlayerId: number | null // MLB player ID (Pro players only)
   position: string
   state: string
   draftClass: string

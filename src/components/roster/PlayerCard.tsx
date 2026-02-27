@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import type { RosterPlayer } from '../../types/roster'
+import { useRosterStore } from '../../store/rosterStore'
 
 const TIER_COLORS: Record<number, string> = {
   1: 'bg-accent-blue/20 text-accent-blue',
@@ -10,6 +11,9 @@ const TIER_COLORS: Record<number, string> = {
 
 export default function PlayerCard({ player }: { player: RosterPlayer }) {
   const [expanded, setExpanded] = useState(false)
+  const setVisitOverride = useRosterStore((s) => s.setVisitOverride)
+  const visitOverrides = useRosterStore((s) => s.visitOverrides)
+  const hasOverride = !!visitOverrides[player.playerName]
 
   return (
     <>
@@ -33,6 +37,7 @@ export default function PlayerCard({ player }: { player: RosterPlayer }) {
         </td>
         <td className="px-4 py-2.5 text-text-dim">
           {player.visitsCompleted}/{player.visitTarget2026}
+          {hasOverride && <span className="ml-1 text-accent-blue" title="Manually overridden">*</span>}
         </td>
         <td className="px-4 py-2.5 text-text-dim">{player.leadAgent}</td>
       </tr>
@@ -49,12 +54,67 @@ export default function PlayerCard({ player }: { player: RosterPlayer }) {
               <Detail label="Email" value={player.email} />
               <Detail label="Father" value={player.father} />
               <Detail label="Mother" value={player.mother} />
-              <Detail label="Last Visit" value={player.lastVisitDate ?? 'None'} />
+            </div>
+
+            {/* Manual visit override */}
+            <div className="mt-4 border-t border-border/30 pt-3">
+              <VisitEditor player={player} onSave={setVisitOverride} />
             </div>
           </td>
         </tr>
       )}
     </>
+  )
+}
+
+function VisitEditor({
+  player,
+  onSave,
+}: {
+  player: RosterPlayer
+  onSave: (name: string, visits: number, lastVisit: string | null) => void
+}) {
+  const [visits, setVisits] = useState(player.visitsCompleted)
+  const [lastVisit, setLastVisit] = useState(player.lastVisitDate ?? '')
+  const [dirty, setDirty] = useState(false)
+
+  return (
+    <div className="flex flex-wrap items-end gap-3">
+      <div>
+        <label className="mb-1 block text-xs text-text-dim">Visits Completed</label>
+        <input
+          type="number"
+          min={0}
+          max={player.visitTarget2026}
+          value={visits}
+          onChange={(e) => { setVisits(parseInt(e.target.value) || 0); setDirty(true) }}
+          className="w-20 rounded-lg border border-border bg-gray-950 px-2 py-1 text-sm text-text"
+          onClick={(e) => e.stopPropagation()}
+        />
+      </div>
+      <div>
+        <label className="mb-1 block text-xs text-text-dim">Last Visit Date</label>
+        <input
+          type="date"
+          value={lastVisit}
+          onChange={(e) => { setLastVisit(e.target.value); setDirty(true) }}
+          className="rounded-lg border border-border bg-gray-950 px-2 py-1 text-sm text-text"
+          onClick={(e) => e.stopPropagation()}
+        />
+      </div>
+      {dirty && (
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            onSave(player.playerName, visits, lastVisit || null)
+            setDirty(false)
+          }}
+          className="rounded-lg bg-accent-blue px-3 py-1 text-xs font-medium text-white hover:bg-accent-blue/80"
+        >
+          Save
+        </button>
+      )}
+    </div>
   )
 }
 
