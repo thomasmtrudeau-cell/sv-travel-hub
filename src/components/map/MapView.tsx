@@ -132,17 +132,19 @@ export default function MapView() {
 
   const venuePlayerMap = useVenuePlayerMap()
 
-  // Venue counts by type
+  // Venue counts by type — only count venues that have players
   const venueCounts = useMemo(() => {
     const counts = { pro: 0, st: 0, ncaa: 0, hs: 0 }
-    for (const v of Object.values(venues)) {
+    for (const [key, v] of Object.entries(venues)) {
+      const hasPlayers = venuePlayerMap.has(key) && venuePlayerMap.get(key)!.length > 0
+      if (!hasPlayers) continue
       if (v.source === 'mlb-api') counts.pro++
       else if (v.source === 'spring-training') counts.st++
       else if (v.source === 'ncaa-hardcoded') counts.ncaa++
       else if (v.source === 'hs-geocoded') counts.hs++
     }
     return counts
-  }, [venues])
+  }, [venues, venuePlayerMap])
 
   const isStActive = isSpringTraining(new Date().toISOString().slice(0, 10))
   const hasProPlayers = players.some((p) => p.level === 'Pro')
@@ -245,7 +247,7 @@ export default function MapView() {
       .bindPopup('Orlando, FL (Home Base)')
       .addTo(map)
 
-    // Venue markers
+    // Venue markers — only show venues that have players mapped
     for (const [key, venue] of Object.entries(venues)) {
       const isPro = venue.source === 'mlb-api'
       const isSt = venue.source === 'spring-training'
@@ -257,6 +259,11 @@ export default function MapView() {
       if (isNcaa && !showNcaa) continue
       if (isHs && !showHs) continue
 
+      const playerList = venuePlayerMap.get(key)
+
+      // Skip venues with no players (e.g. ST sites for orgs Kent has no clients in)
+      if (!playerList || playerList.length === 0) continue
+
       const color = isPro ? '#60a5fa' : isSt ? '#f472b6' : isNcaa ? '#34d399' : '#fb923c'
       const size = isSt ? 12 : 10
 
@@ -267,19 +274,16 @@ export default function MapView() {
         iconAnchor: [size / 2, size / 2],
       })
 
-      const sourceLabel = isPro ? 'Pro Venue (from schedule)' : isSt ? 'Spring Training Site' : isNcaa ? 'NCAA Venue' : 'HS Venue (geocoded)'
-      const playerList = venuePlayerMap.get(key)
+      const sourceLabel = isPro ? 'Pro Venue' : isSt ? 'Spring Training Site' : isNcaa ? 'College Venue' : 'High School'
 
       // Derive org label from players at this venue
       let orgLabel: string | undefined
-      if (playerList && playerList.length > 0) {
-        const firstPlayer = players.find((p) => p.playerName === playerList[0]!.name)
-        if (firstPlayer) {
-          if (isHs) {
-            orgLabel = `${firstPlayer.org}, ${firstPlayer.state}`
-          } else {
-            orgLabel = firstPlayer.org
-          }
+      const firstPlayer = players.find((p) => p.playerName === playerList[0]!.name)
+      if (firstPlayer) {
+        if (isHs) {
+          orgLabel = `${firstPlayer.org}, ${firstPlayer.state}`
+        } else {
+          orgLabel = firstPlayer.org
         }
       }
 
@@ -356,20 +360,30 @@ export default function MapView() {
 
   return (
     <div className="space-y-4">
-      {/* Layer toggles */}
+      {/* Layer toggles — only show categories that are relevant */}
       <div className="flex flex-wrap gap-3 rounded-xl border border-border bg-surface p-3">
-        <Toggle label={`Pro Venues (${venueCounts.pro})`} color="bg-accent-blue" checked={showPro} onChange={setShowPro} />
-        <Toggle label={`Spring Training (${venueCounts.st})`} color="bg-pink-500" checked={showSt} onChange={setShowSt} />
-        <Toggle label={`NCAA Venues (${venueCounts.ncaa})`} color="bg-accent-green" checked={showNcaa} onChange={setShowNcaa} />
-        <Toggle label={`HS Venues (${venueCounts.hs})`} color="bg-accent-orange" checked={showHs} onChange={setShowHs} />
-        <Toggle label="Trip Routes" color="bg-accent-purple" checked={showTrips} onChange={setShowTrips} />
+        {(venueCounts.pro > 0 || (hasProPlayers && proGames.length > 0)) && (
+          <Toggle label={`Pro (${venueCounts.pro})`} color="bg-accent-blue" checked={showPro} onChange={setShowPro} />
+        )}
+        {(venueCounts.st > 0 || (hasProPlayers && isStActive)) && (
+          <Toggle label={`Spring Training (${venueCounts.st})`} color="bg-pink-500" checked={showSt} onChange={setShowSt} />
+        )}
+        {venueCounts.ncaa > 0 && (
+          <Toggle label={`College (${venueCounts.ncaa})`} color="bg-accent-green" checked={showNcaa} onChange={setShowNcaa} />
+        )}
+        {(venueCounts.hs > 0 || hasHsPlayers) && (
+          <Toggle label={`High School (${venueCounts.hs})`} color="bg-accent-orange" checked={showHs} onChange={setShowHs} />
+        )}
+        {tripPlan && tripPlan.trips.length > 0 && (
+          <Toggle label="Trip Routes" color="bg-accent-purple" checked={showTrips} onChange={setShowTrips} />
+        )}
       </div>
 
       {/* Selected trip indicator */}
       {selectedTripIndex !== null && tripPlan?.trips[selectedTripIndex] && (
         <div className="flex items-center justify-between rounded-xl border border-accent-blue/30 bg-accent-blue/5 p-3">
           <span className="text-sm text-accent-blue">
-            Showing Trip #{selectedTripIndex + 1} route with numbered stops
+            Showing Trip #{selectedTripIndex + 1} — numbered stops mark the driving order
           </span>
           <button
             onClick={() => setSelectedTripIndex(null)}
@@ -385,15 +399,15 @@ export default function MapView() {
         {hasProPlayers && venueCounts.pro === 0 && (
           <div className="rounded-lg border border-accent-blue/20 bg-accent-blue/5 px-3 py-1.5 text-[11px] text-accent-blue">
             {isStActive
-              ? 'Pro players are at Spring Training sites (pink dots). Fetch schedules on the Schedule tab for regular season venues.'
-              : 'Fetch Pro schedules on the Schedule tab to see regular season venues on the map.'}
+              ? 'During spring training, Pro players are shown at their ST sites (pink dots). Load game schedules on the Data Setup tab to see regular season stadiums too.'
+              : 'Load Pro game schedules on the Data Setup tab to see their stadiums on the map.'}
           </div>
         )}
         {hasHsPlayers && venueCounts.hs === 0 && !hsGeocodingProgress && (
           <div className="rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-1.5 text-[11px] text-accent-orange">
             {hsGeocodingError
-              ? `HS geocoding failed: ${hsGeocodingError}. Try refreshing.`
-              : 'HS venues are geocoded from school names. Load roster first, then revisit this tab.'}
+              ? `Couldn't locate high school addresses: ${hsGeocodingError}. Try refreshing the page.`
+              : 'High school locations are being looked up from school names. They\'ll appear once the roster is loaded.'}
           </div>
         )}
       </div>
@@ -407,13 +421,13 @@ export default function MapView() {
       {hsGeocodingProgress && (
         <div className="flex items-center gap-2 text-xs text-text-dim">
           <span className="h-3 w-3 animate-spin rounded-full border border-text-dim border-t-transparent" />
-          Geocoding HS venues: {hsGeocodingProgress.completed}/{hsGeocodingProgress.total}
+          Looking up high school locations: {hsGeocodingProgress.completed}/{hsGeocodingProgress.total}
         </div>
       )}
 
       {/* Venue summary */}
       <p className="text-xs text-text-dim">
-        {Object.keys(venues).length} venues loaded — click any marker to see players at that venue
+        {venueCounts.pro + venueCounts.st + venueCounts.ncaa + venueCounts.hs} venues with your players — click any dot to see who's there
       </p>
     </div>
   )
