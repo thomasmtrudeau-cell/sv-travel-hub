@@ -95,6 +95,7 @@ export const NCAA_ALIASES: Record<string, string[]> = {
   'Rutgers': ['Rutgers University', 'Scarlet Knights'],
   'Sacramento State': ['Sac State', 'Sacramento State Hornets'],
   'Saint Josephs': ["Saint Joseph's", "St. Joseph's", "St. Josephs", 'Hawks'],
+  'Tulane': ['Tulane University', 'Tulane Green Wave', 'Green Wave'],
 }
 
 // Reverse lookup: alias → canonical name

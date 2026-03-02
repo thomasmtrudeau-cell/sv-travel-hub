@@ -107,4 +107,8 @@ export const NCAA_VENUES: Record<string, { venueName: string; coords: Coordinate
     venueName: "Smithson Field",
     coords: { lat: 40.0045, lng: -75.2446 },
   },
+  'Tulane': {
+    venueName: 'Greer Field at Turchin Stadium',
+    coords: { lat: 29.9419, lng: -90.1183 },
+  },
 }
