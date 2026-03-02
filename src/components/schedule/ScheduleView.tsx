@@ -110,9 +110,9 @@ export default function ScheduleView() {
       {/* Unresolved players — alias editor */}
       {hasUnresolved && (
         <div className="rounded-xl border border-accent-red/30 bg-accent-red/5 p-4">
-          <h3 className="mb-2 text-sm font-semibold text-accent-red">Unrecognized Organizations</h3>
+          <h3 className="mb-2 text-sm font-semibold text-accent-red">Unknown Team Names</h3>
           <p className="mb-3 text-xs text-text-dim">
-            These players' orgs don't match our alias table. Map them below to include in trip planning.
+            We couldn't match these team/school names from the roster. Pick the correct organization below so their schedules load properly.
           </p>
           <div className="space-y-2">
             {/* Group unresolved by unique org name */}
@@ -170,9 +170,9 @@ export default function ScheduleView() {
       <div className="rounded-xl border border-border bg-surface p-5">
         <div className="mb-4 flex items-center justify-between">
           <div>
-            <h2 className="text-base font-semibold text-text">Player Team Assignments</h2>
+            <h2 className="text-base font-semibold text-text">Where Are Your Pro Players?</h2>
             <p className="text-xs text-text-dim">
-              Assign each Pro player to their current MiLB/MLB team ({assignedCount}/{proPlayers.length} assigned)
+              Pick which team each Pro player is currently on so we can find their games ({assignedCount}/{proPlayers.length} connected)
               {isStActive && (
                 <span className="ml-2 inline-flex items-center gap-1 rounded-full bg-accent-orange/15 px-2 py-0.5 text-[10px] font-medium text-accent-orange">
                   <span className="h-1.5 w-1.5 rounded-full bg-accent-orange" />
@@ -306,7 +306,7 @@ export default function ScheduleView() {
       {/* Schedule fetch controls */}
       <div className="rounded-xl border border-border bg-surface p-5">
         <div className="mb-3 flex items-center gap-2">
-          <h2 className="text-base font-semibold text-text">Fetch Schedules</h2>
+          <h2 className="text-base font-semibold text-text">Pull Game Schedules</h2>
           {proFetchedAt && (
             <span className={`rounded px-2 py-0.5 text-[10px] font-medium ${
               Date.now() - proFetchedAt > 24 * 60 * 60 * 1000
@@ -344,7 +344,7 @@ export default function ScheduleView() {
             disabled={schedulesLoading || assignedCount === 0}
             className="rounded-lg bg-accent-blue px-4 py-2 text-sm font-medium text-white hover:bg-accent-blue/80 disabled:opacity-50"
           >
-            {schedulesLoading ? 'Fetching...' : 'Fetch Schedules'}
+            {schedulesLoading ? 'Loading games...' : 'Load Game Schedules'}
           </button>
         </div>
 
@@ -378,7 +378,7 @@ export default function ScheduleView() {
         <div className="rounded-xl border border-border bg-surface p-5">
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <h2 className="text-base font-semibold text-text">Roster Moves</h2>
+              <h2 className="text-base font-semibold text-text">Player Movement Alerts</h2>
               {rosterMovesCheckedAt && (
                 <span className="rounded px-2 py-0.5 text-[10px] font-medium bg-accent-green/10 text-accent-green">
                   checked {formatTimeAgo(new Date(rosterMovesCheckedAt).getTime())}
@@ -394,7 +394,7 @@ export default function ScheduleView() {
             </button>
           </div>
           <p className="mb-3 text-xs text-text-dim">
-            Queries MLB transactions (last 30 days) to detect promotions, demotions, and trades for rostered players.
+            Checks if any of your Pro players have been promoted, demoted, or traded in the last 30 days.
           </p>
 
           {rosterMoves.length > 0 && (
@@ -430,7 +430,7 @@ export default function ScheduleView() {
         <div className="rounded-xl border border-accent-green/30 bg-surface p-5">
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <h2 className="text-base font-semibold text-accent-green">NCAA Players</h2>
+              <h2 className="text-base font-semibold text-accent-green">College Players</h2>
               <span className="rounded-full bg-accent-green/15 px-2 py-0.5 text-[10px] font-medium text-accent-green">
                 {ncaaPlayers.length} players
               </span>
@@ -454,7 +454,7 @@ export default function ScheduleView() {
               disabled={ncaaLoading}
               className="rounded-lg bg-accent-green px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-green/80 disabled:opacity-50"
             >
-              {ncaaLoading ? 'Fetching...' : ncaaGames.length > 0 ? 'Refresh Schedules' : 'Fetch Schedules from D1Baseball'}
+              {ncaaLoading ? 'Loading games...' : ncaaGames.length > 0 ? 'Refresh Schedules' : 'Load College Schedules'}
             </button>
           </div>
 
@@ -508,8 +508,8 @@ export default function ScheduleView() {
           {ncaaGames.length === 0 && (
             <div className="mt-3 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-2">
               <p className="text-[11px] text-accent-orange">
-                Without D1Baseball schedules, NCAA games are estimated based on typical home game days.
-                Fetch real schedules above for actual dates including away games.
+                Without real schedules loaded, college games are estimated based on typical home game days.
+                Load real schedules above for actual dates including away games.
               </p>
             </div>
           )}
@@ -531,8 +531,8 @@ export default function ScheduleView() {
             )}
           </div>
           <p className="mb-3 text-xs text-text-dim">
-            Visit opportunities generated for typical home game days (Tue/Thu).
-            Players assumed at their school on school days, but may travel for away games.
+            Visit opportunities based on typical home game days (Tue/Thu).
+            Players are generally at their school on weekdays.
           </p>
           <div className="grid gap-1 sm:grid-cols-2">
             {hsPlayers.map((player) => (
@@ -546,9 +546,8 @@ export default function ScheduleView() {
           </div>
           <div className="mt-3 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-2">
             <p className="text-[11px] text-accent-orange">
-              Note: HS schedules are estimated. We don't have exact game dates.
-              Players are generally at their school on weekdays but may travel the day before away games.
-              Venues are geocoded from school name — verify accuracy on the Map tab.
+              Note: High school schedules are estimated since we don't have exact game dates.
+              Check the Map tab to verify that each school's location looks correct.
             </p>
           </div>
         </div>

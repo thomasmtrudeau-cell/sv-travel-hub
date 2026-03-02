@@ -2,11 +2,31 @@ import { useState, type ReactNode } from 'react'
 
 export type TabId = 'roster' | 'schedule' | 'trips' | 'map'
 
-const TABS: { id: TabId; label: string }[] = [
-  { id: 'roster', label: 'Roster' },
-  { id: 'schedule', label: 'Schedule' },
-  { id: 'trips', label: 'Trips' },
-  { id: 'map', label: 'Map' },
+const TABS: { id: TabId; label: string; heading: string; description: string }[] = [
+  {
+    id: 'roster',
+    label: 'Roster',
+    heading: 'Client Roster',
+    description: 'Your full list of players to visit this year. This pulls from the Google Sheet and shows each player\'s tier, visit targets, and progress.',
+  },
+  {
+    id: 'schedule',
+    label: 'Data Setup',
+    heading: 'Data Setup',
+    description: 'Connect each player to their current team so we can look up where and when they play. Once connected, the app pulls their game schedules automatically.',
+  },
+  {
+    id: 'trips',
+    label: 'Trip Planner',
+    heading: 'Trip Planner',
+    description: 'Pick a date range and the app builds optimized road trips from Orlando, grouping nearby players together. You can also export trips to your calendar.',
+  },
+  {
+    id: 'map',
+    label: 'Map',
+    heading: 'Venue Map',
+    description: 'See all player venues on a map with drive-time context from Orlando. Click "Map" on any trip card to highlight that trip\'s route.',
+  },
 ]
 
 interface AppShellProps {
@@ -15,6 +35,7 @@ interface AppShellProps {
 
 export default function AppShell({ children }: AppShellProps) {
   const [activeTab, setActiveTab] = useState<TabId>('roster')
+  const currentTab = TABS.find((t) => t.id === activeTab)!
 
   return (
     <div className="mx-auto min-h-screen max-w-7xl px-4 py-6 sm:px-6">
@@ -40,6 +61,12 @@ export default function AppShell({ children }: AppShellProps) {
           </button>
         ))}
       </nav>
+
+      {/* Tab header */}
+      <div className="mb-6 rounded-xl border border-border/50 bg-surface/50 px-5 py-4">
+        <h2 className="text-base font-semibold text-text">{currentTab.heading}</h2>
+        <p className="mt-1 text-sm text-text-dim">{currentTab.description}</p>
+      </div>
 
       <main>{children[activeTab]}</main>
     </div>

@@ -112,6 +112,9 @@ export default function RosterDashboard() {
         />
       </div>
 
+      {/* Falling-behind alerts for T1/T2 */}
+      <BehindPaceAlerts players={players} />
+
       {/* Per-tier coverage */}
       {stats.tiers.length > 0 && (
         <div className="rounded-xl border border-border bg-surface p-4">
@@ -246,6 +249,74 @@ export default function RosterDashboard() {
 
       {filtered.length === 0 && (
         <p className="py-10 text-center text-sm text-text-dim">No players match your filters.</p>
+      )}
+    </div>
+  )
+}
+
+function BehindPaceAlerts({ players }: { players: RosterPlayer[] }) {
+  const now = new Date()
+  const seasonEnd = new Date(now.getFullYear(), 8, 30) // Sept 30
+  if (now > seasonEnd) return null
+
+  const monthsLeft = Math.max(
+    (seasonEnd.getFullYear() - now.getFullYear()) * 12 + (seasonEnd.getMonth() - now.getMonth()),
+    0.5,
+  )
+
+  const behindT1: Array<{ name: string; remaining: number; perMonth: number }> = []
+  const behindT2: Array<{ name: string; remaining: number; perMonth: number }> = []
+
+  for (const p of players) {
+    if (p.visitsRemaining <= 0) continue
+    if (p.tier !== 1 && p.tier !== 2) continue
+    const perMonth = p.visitsRemaining / monthsLeft
+    if (perMonth > 1.5) {
+      const entry = { name: p.playerName, remaining: p.visitsRemaining, perMonth: Math.round(perMonth * 10) / 10 }
+      if (p.tier === 1) behindT1.push(entry)
+      else behindT2.push(entry)
+    }
+  }
+
+  if (behindT1.length === 0 && behindT2.length === 0) return null
+
+  return (
+    <div className="space-y-2">
+      {behindT1.length > 0 && (
+        <div className="rounded-xl border border-accent-red/30 bg-accent-red/5 p-4">
+          <h3 className="mb-2 text-sm font-semibold text-accent-red">
+            {behindT1.length} Tier 1 player{behindT1.length !== 1 ? 's' : ''} behind pace
+          </h3>
+          <p className="mb-2 text-xs text-text-dim">
+            Need &gt;1.5 visits/month to hit targets by Sept 30 ({Math.round(monthsLeft)} months left)
+          </p>
+          <div className="space-y-1">
+            {behindT1.map((p) => (
+              <div key={p.name} className="flex items-center justify-between text-sm">
+                <span className="font-medium text-text">{p.name}</span>
+                <span className="text-xs text-accent-red">{p.remaining} visits left ({p.perMonth}/mo needed)</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {behindT2.length > 0 && (
+        <div className="rounded-xl border border-accent-orange/30 bg-accent-orange/5 p-4">
+          <h3 className="mb-2 text-sm font-semibold text-accent-orange">
+            {behindT2.length} Tier 2 player{behindT2.length !== 1 ? 's' : ''} behind pace
+          </h3>
+          <p className="mb-2 text-xs text-text-dim">
+            Need &gt;1.5 visits/month to hit targets by Sept 30 ({Math.round(monthsLeft)} months left)
+          </p>
+          <div className="space-y-1">
+            {behindT2.map((p) => (
+              <div key={p.name} className="flex items-center justify-between text-sm">
+                <span className="font-medium text-text">{p.name}</span>
+                <span className="text-xs text-accent-orange">{p.remaining} visits left ({p.perMonth}/mo needed)</span>
+              </div>
+            ))}
+          </div>
+        </div>
       )}
     </div>
   )

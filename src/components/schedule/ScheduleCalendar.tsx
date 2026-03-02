@@ -232,6 +232,17 @@ export default function ScheduleCalendar({ games }: Props) {
                         <span className={`text-[10px] font-medium ${confirmColor}`}>
                           {confirmLabel}
                         </span>
+                        {g.gameStatus && g.gameStatus !== 'Final' && g.gameStatus !== 'Scheduled' && (
+                          <span className={`rounded px-1.5 py-0.5 text-[10px] font-bold ${
+                            g.gameStatus === 'Postponed' || g.gameStatus === 'Suspended'
+                              ? 'bg-accent-red/15 text-accent-red'
+                              : g.gameStatus === 'Cancelled' || g.gameStatus === 'Canceled'
+                                ? 'bg-accent-red/15 text-accent-red line-through'
+                                : 'bg-gray-800 text-text-dim'
+                          }`}>
+                            {g.gameStatus}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>

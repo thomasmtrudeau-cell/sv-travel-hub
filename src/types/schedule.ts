@@ -23,6 +23,7 @@ export interface GameEvent {
   confidence?: VisitConfidence
   confidenceNote?: string // e.g. "Typical home game day" or "May be traveling for away series"
   sourceUrl?: string // Link to verify this game (MLB Gameday, D1Baseball schedule, etc.)
+  gameStatus?: string // e.g. "Final", "Postponed", "Cancelled" from MLB API status.detailedState
 }
 
 export interface ScoreBreakdown {
