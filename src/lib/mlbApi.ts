@@ -129,3 +129,65 @@ export async function fetchAllSchedules(
 
   return schedules
 }
+
+// --- Transactions API ---
+
+export interface MLBTransaction {
+  player: { id: number; fullName: string }
+  fromTeam?: { id: number; name: string }
+  toTeam?: { id: number; name: string }
+  typeDesc: string          // "Recalled", "Optioned", "Traded", etc.
+  date: string              // "2026-03-01"
+  effectiveDate: string
+}
+
+// Fetch transactions for a team within a date range
+export async function fetchTransactions(
+  teamId: number,
+  startDate: string,
+  endDate: string,
+): Promise<MLBTransaction[]> {
+  const url = `${MLB_BASE}/transactions?teamId=${teamId}&startDate=${startDate}&endDate=${endDate}`
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`MLB transactions fetch failed: ${res.status}`)
+  const data = await res.json()
+
+  const transactions: MLBTransaction[] = []
+  for (const t of data.transactions ?? []) {
+    transactions.push({
+      player: { id: t.person?.id ?? 0, fullName: t.person?.fullName ?? 'Unknown' },
+      fromTeam: t.fromTeam ? { id: t.fromTeam.id, name: t.fromTeam.name } : undefined,
+      toTeam: t.toTeam ? { id: t.toTeam.id, name: t.toTeam.name } : undefined,
+      typeDesc: t.typeDesc ?? t.description ?? '',
+      date: t.date ?? '',
+      effectiveDate: t.effectiveDate ?? t.date ?? '',
+    })
+  }
+  return transactions
+}
+
+// Batch fetch transactions for multiple teams
+export async function fetchAllTransactions(
+  teamIds: number[],
+  startDate: string,
+  endDate: string,
+  onProgress?: (completed: number, total: number) => void,
+): Promise<MLBTransaction[]> {
+  const all: MLBTransaction[] = []
+  const concurrency = 5
+  let completed = 0
+
+  for (let i = 0; i < teamIds.length; i += concurrency) {
+    const batch = teamIds.slice(i, i + concurrency)
+    const results = await Promise.all(
+      batch.map((id) => fetchTransactions(id, startDate, endDate).catch(() => [] as MLBTransaction[])),
+    )
+    for (const txns of results) {
+      all.push(...txns)
+    }
+    completed += batch.length
+    onProgress?.(completed, teamIds.length)
+  }
+
+  return all
+}

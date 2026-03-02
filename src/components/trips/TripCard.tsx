@@ -1,11 +1,15 @@
 import { useState } from 'react'
 import { useRosterStore } from '../../store/rosterStore'
+import { useTripStore, getTripKey } from '../../store/tripStore'
 import type { TripCandidate, VisitConfidence, ScheduleSource } from '../../types/schedule'
+import type { TripStatus } from '../../store/tripStore'
 import type { RosterPlayer } from '../../types/roster'
 
 interface Props {
   trip: TripCandidate
   index: number
+  defaultExpanded?: boolean
+  onPlayerClick?: (playerName: string) => void
 }
 
 function formatDate(dateStr: string): string {
@@ -20,6 +24,15 @@ function formatDriveTime(minutes: number): string {
   const m = minutes % 60
   if (h === 0) return `${m}m`
   return m > 0 ? `${h}h ${m}m` : `${h}h`
+}
+
+function formatGameTime(timeStr?: string, source?: ScheduleSource): string {
+  if (!timeStr) return ''
+  // Synthetic events (ST/NCAA/HS) have generic times — show TBD
+  if (source && source !== 'mlb-api') return 'TBD'
+  const d = new Date(timeStr)
+  if (isNaN(d.getTime())) return ''
+  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true, timeZone: 'America/New_York' }) + ' ET'
 }
 
 // Derive a human-readable reason the player should be at this venue
@@ -115,6 +128,8 @@ interface VenueStop {
   awayTeam: string
   sourceUrl?: string
   orgLabel: string
+  gameTime?: string
+  gameStatus?: string
 }
 
 function buildVenueStops(trip: TripCandidate, players: RosterPlayer[]): VenueStop[] {
@@ -141,6 +156,8 @@ function buildVenueStops(trip: TripCandidate, players: RosterPlayer[]): VenueSto
     awayTeam: trip.anchorGame.awayTeam,
     sourceUrl: trip.anchorGame.sourceUrl,
     orgLabel: anchorOrg,
+    gameTime: trip.anchorGame.time,
+    gameStatus: trip.anchorGame.gameStatus,
   })
 
   // Merge nearby games by venue
@@ -169,6 +186,8 @@ function buildVenueStops(trip: TripCandidate, players: RosterPlayer[]): VenueSto
         awayTeam: game.awayTeam,
         sourceUrl: game.sourceUrl,
         orgLabel: org,
+        gameTime: game.time,
+        gameStatus: game.gameStatus,
       })
     }
   }
@@ -220,18 +239,40 @@ export function generateItineraryText(trip: TripCandidate, index: number, stops:
   return text
 }
 
-export default function TripCard({ trip, index }: Props) {
+export default function TripCard({ trip, index, defaultExpanded = false, onPlayerClick }: Props) {
   const players = useRosterStore((s) => s.players)
   const playerMap = new Map<string, RosterPlayer>()
   for (const p of players) playerMap.set(p.playerName, p)
 
   const stops = buildVenueStops(trip, players)
+  const [expanded, setExpanded] = useState(defaultExpanded)
   const [showScoreDetail, setShowScoreDetail] = useState(false)
   const [copied, setCopied] = useState(false)
+
+  const tripKey = getTripKey(trip)
+  const tripStatuses = useTripStore((s) => s.tripStatuses)
+  const setTripStatus = useTripStore((s) => s.setTripStatus)
+  const currentStatus = tripStatuses[tripKey] as TripStatus | undefined
+
+  function cycleStatus(e: React.MouseEvent) {
+    e.stopPropagation()
+    if (!currentStatus) setTripStatus(tripKey, 'planned')
+    else if (currentStatus === 'planned') setTripStatus(tripKey, 'completed')
+    else setTripStatus(tripKey, null)
+  }
 
   const allPlayers = new Set<string>()
   for (const stop of stops) {
     for (const name of stop.players) allPlayers.add(name)
+  }
+
+  // Compute tier counts for collapsed header
+  const tierCounts = { t1: 0, t2: 0, t3: 0 }
+  for (const name of allPlayers) {
+    const tier = playerMap.get(name)?.tier
+    if (tier === 1) tierCounts.t1++
+    else if (tier === 2) tierCounts.t2++
+    else if (tier === 3) tierCounts.t3++
   }
 
   const hasUncertainEvents =
@@ -277,22 +318,35 @@ export default function TripCard({ trip, index }: Props) {
 
   return (
     <div className="rounded-xl border border-border bg-surface p-5">
-      {/* Header */}
-      <div className="mb-4 flex items-start justify-between gap-4">
-        <div>
+      {/* Header — always visible, clickable to expand/collapse */}
+      <div
+        className="flex cursor-pointer items-start justify-between gap-4"
+        onClick={() => setExpanded(!expanded)}
+      >
+        <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
+            <span className={`text-text-dim transition-transform ${expanded ? 'rotate-90' : ''}`}>&#9654;</span>
             <h3 className="text-base font-semibold text-text">
               Trip #{index}
             </h3>
             {breakdown && (
-              <button
-                onClick={() => setShowScoreDetail(!showScoreDetail)}
-                className="rounded-lg bg-accent-blue/10 px-2 py-0.5 text-xs font-bold text-accent-blue hover:bg-accent-blue/20 transition-colors"
-                title="Click to see score breakdown"
-              >
+              <span className="rounded-lg bg-accent-blue/10 px-2 py-0.5 text-xs font-bold text-accent-blue">
                 {breakdown.finalScore} pts
-              </button>
+              </span>
             )}
+            <button
+              onClick={cycleStatus}
+              className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                currentStatus === 'planned'
+                  ? 'bg-accent-blue/15 text-accent-blue border border-accent-blue/30'
+                  : currentStatus === 'completed'
+                    ? 'bg-accent-green/15 text-accent-green border border-accent-green/30'
+                    : 'bg-gray-800 text-text-dim/50 border border-border/30 hover:text-text-dim'
+              }`}
+              title={currentStatus ? `Status: ${currentStatus} (click to cycle)` : 'Click to mark as Planned'}
+            >
+              {currentStatus === 'planned' ? 'Planned' : currentStatus === 'completed' ? 'Completed' : 'No Status'}
+            </button>
           </div>
           <p className="mt-0.5 text-sm text-text-dim">
             {dateLabel}
@@ -303,7 +357,7 @@ export default function TripCard({ trip, index }: Props) {
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <button
-            onClick={handleCopyItinerary}
+            onClick={(e) => { e.stopPropagation(); handleCopyItinerary() }}
             className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors"
             title="Copy trip itinerary to clipboard"
           >
@@ -315,14 +369,39 @@ export default function TripCard({ trip, index }: Props) {
               player{allPlayers.size !== 1 ? 's' : ''}
             </span>
           </div>
+          {(tierCounts.t1 > 0 || tierCounts.t2 > 0 || tierCounts.t3 > 0) && (
+            <div className="flex items-center gap-1 rounded-lg bg-gray-950/60 px-2 py-1 text-[11px] font-medium">
+              {tierCounts.t1 > 0 && <span className="text-accent-red">{tierCounts.t1}×T1</span>}
+              {tierCounts.t1 > 0 && (tierCounts.t2 > 0 || tierCounts.t3 > 0) && <span className="text-text-dim/30">·</span>}
+              {tierCounts.t2 > 0 && <span className="text-accent-orange">{tierCounts.t2}×T2</span>}
+              {tierCounts.t2 > 0 && tierCounts.t3 > 0 && <span className="text-text-dim/30">·</span>}
+              {tierCounts.t3 > 0 && <span className="text-yellow-400">{tierCounts.t3}×T3</span>}
+            </div>
+          )}
           <div className="rounded-lg bg-gray-950/60 px-2.5 py-1">
             <span className="text-sm font-bold text-text">{stops.length}</span>
             <span className="ml-1 text-[11px] text-text-dim">
               venue{stops.length !== 1 ? 's' : ''}
             </span>
           </div>
+          <div className="rounded-lg bg-gray-950/60 px-2.5 py-1">
+            <span className="text-[11px] text-text-dim">~{formatDriveTime(trip.totalDriveMinutes)}</span>
+          </div>
         </div>
       </div>
+
+      {/* Expanded content */}
+      {expanded && (<div className="mt-4">
+
+      {/* Score breakdown toggle */}
+      {breakdown && (
+        <button
+          onClick={(e) => { e.stopPropagation(); setShowScoreDetail(!showScoreDetail) }}
+          className="mb-2 rounded-lg bg-accent-blue/10 px-2 py-0.5 text-xs font-bold text-accent-blue hover:bg-accent-blue/20 transition-colors"
+        >
+          {showScoreDetail ? 'Hide Score Detail' : 'Show Score Detail'}
+        </button>
+      )}
 
       {/* Score breakdown (expandable) */}
       {showScoreDetail && breakdown && (
@@ -416,6 +495,16 @@ export default function TripCard({ trip, index }: Props) {
                         {srcBadge.label}
                       </span>
                     )}
+                    {stop.gameStatus && (stop.gameStatus === 'Postponed' || stop.gameStatus === 'Suspended') && (
+                      <span className="rounded bg-accent-red/15 px-1.5 py-0.5 text-[10px] font-bold text-accent-red">
+                        {stop.gameStatus}
+                      </span>
+                    )}
+                    {stop.gameStatus && (stop.gameStatus === 'Cancelled' || stop.gameStatus === 'Canceled') && (
+                      <span className="rounded bg-accent-red/15 px-1.5 py-0.5 text-[10px] font-bold text-accent-red line-through">
+                        Canceled
+                      </span>
+                    )}
                     {stop.isAnchor && (
                       <span className="rounded bg-accent-blue/20 px-1.5 py-0.5 text-[10px] font-medium text-accent-blue">
                         BASE
@@ -434,6 +523,13 @@ export default function TripCard({ trip, index }: Props) {
                     )}
                   </div>
 
+                  {/* Game time */}
+                  {formatGameTime(stop.gameTime, stop.source) && (
+                    <p className="mt-0.5 text-[11px] text-text-dim/70">
+                      {formatGameTime(stop.gameTime, stop.source)}
+                    </p>
+                  )}
+
                   {/* Confidence badge */}
                   {stop.confidence && stop.confidence !== 'high' && (
                     <ConfidenceBadge confidence={stop.confidence} note={stop.confidenceNote} />
@@ -446,7 +542,11 @@ export default function TripCard({ trip, index }: Props) {
                       const tier = player?.tier ?? 4
                       const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
                       return (
-                        <span key={name} className="inline-flex items-center gap-1 rounded-full bg-surface px-2.5 py-0.5 text-[11px] font-medium text-text">
+                        <span
+                          key={name}
+                          className={`inline-flex items-center gap-1 rounded-full bg-surface px-2.5 py-0.5 text-[11px] font-medium text-text ${onPlayerClick ? 'cursor-pointer hover:bg-accent-blue/10' : ''}`}
+                          onClick={onPlayerClick ? (e) => { e.stopPropagation(); onPlayerClick(name) } : undefined}
+                        >
                           <span className={`inline-block h-2 w-2 rounded-full ${dotColor}`} title={`Tier ${tier}`} />
                           {name}
                           <span className="text-text-dim/60">T{tier}</span>
@@ -480,6 +580,7 @@ export default function TripCard({ trip, index }: Props) {
           </p>
         </div>
       )}
+      </div>)}
     </div>
   )
 }

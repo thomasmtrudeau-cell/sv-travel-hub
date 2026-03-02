@@ -1,11 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useScheduleStore } from '../../store/scheduleStore'
 import { useRosterStore } from '../../store/rosterStore'
-import { resolveMLBTeamId, resolveNcaaName } from '../../data/aliases'
+import { resolveMLBTeamId, resolveNcaaName, MLB_ORG_IDS, NCAA_ALIASES } from '../../data/aliases'
 import { NCAA_VENUES } from '../../data/ncaaVenues'
 import { isSpringTraining, getSpringTrainingSite, isGrapefruitLeague } from '../../data/springTraining'
-import { isNcaaSeason, isHsSeason } from '../../lib/tripEngine'
+import { isNcaaSeason, isHsSeason, generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents } from '../../lib/tripEngine'
 import type { MLBAffiliate } from '../../lib/mlbApi'
+import { useVenueStore } from '../../store/venueStore'
+import type { GameEvent } from '../../types/schedule'
+import type { Coordinates } from '../../types/roster'
 import ScheduleCalendar from './ScheduleCalendar'
 
 function formatTimeAgo(ts: number): string {
@@ -43,9 +46,21 @@ export default function ScheduleView() {
   const fetchNcaaSchedules = useScheduleStore((s) => s.fetchNcaaSchedules)
   const proFetchedAt = useScheduleStore((s) => s.proFetchedAt)
   const ncaaFetchedAt = useScheduleStore((s) => s.ncaaFetchedAt)
+  const customMlbAliases = useScheduleStore((s) => s.customMlbAliases)
+  const customNcaaAliases = useScheduleStore((s) => s.customNcaaAliases)
+  const setCustomAlias = useScheduleStore((s) => s.setCustomAlias)
+  const rosterMoves = useScheduleStore((s) => s.rosterMoves)
+  const rosterMovesLoading = useScheduleStore((s) => s.rosterMovesLoading)
+  const rosterMovesCheckedAt = useScheduleStore((s) => s.rosterMovesCheckedAt)
+  const checkRosterMoves = useScheduleStore((s) => s.checkRosterMoves)
 
   const [startDate, setStartDate] = useState('2026-03-01')
   const [endDate, setEndDate] = useState('2026-09-30')
+  const [sourceFilters, setSourceFilters] = useState<Record<string, boolean>>({
+    pro: true, st: true, ncaa: true, hs: true,
+  })
+
+  const venueState = useVenueStore((s) => s.venues)
 
   const initialized = useRef(false)
   useEffect(() => {
@@ -69,31 +84,81 @@ export default function ScheduleView() {
 
   const isStActive = isSpringTraining(new Date().toISOString().slice(0, 10))
 
-  // Unresolved players (org not recognized)
-  const unresolvedPro = proPlayers.filter((p) => !resolveMLBTeamId(p.org))
-  const unresolvedNcaa = ncaaPlayers.filter((p) => !resolveNcaaName(p.org))
+  // Unresolved players (org not recognized even with custom aliases)
+  const unresolvedPro = proPlayers.filter((p) => !resolveMLBTeamId(p.org, customMlbAliases))
+  const unresolvedNcaa = ncaaPlayers.filter((p) => !resolveNcaaName(p.org, customNcaaAliases))
   const hasUnresolved = unresolvedPro.length > 0 || unresolvedNcaa.length > 0
+
+  // Get unique canonical MLB org names for the dropdown
+  const mlbOrgNames = useMemo(() => {
+    const names = new Set<string>()
+    for (const key of Object.keys(MLB_ORG_IDS)) {
+      // Only include full names (contain space) to avoid duplicates like "Reds" and "Cincinnati Reds"
+      if (key.includes(' ')) names.add(key)
+    }
+    return [...names].sort()
+  }, [])
+
+  // Get unique canonical NCAA school names for the dropdown
+  const ncaaSchoolNames = useMemo(() => [...Object.keys(NCAA_ALIASES)].sort(), [])
 
   return (
     <div className="space-y-6">
-      {/* Unresolved players warning */}
+      {/* Unresolved players — alias editor */}
       {hasUnresolved && (
         <div className="rounded-xl border border-accent-red/30 bg-accent-red/5 p-4">
           <h3 className="mb-2 text-sm font-semibold text-accent-red">Unrecognized Organizations</h3>
-          <p className="mb-2 text-xs text-text-dim">
-            These players' orgs don't match our alias table — they won't appear in trip planning until resolved.
+          <p className="mb-3 text-xs text-text-dim">
+            These players' orgs don't match our alias table. Map them below to include in trip planning.
           </p>
-          <div className="flex flex-wrap gap-2">
-            {unresolvedPro.map((p) => (
-              <span key={p.playerName} className="rounded-full bg-accent-red/10 px-2.5 py-1 text-[11px] text-accent-red">
-                {p.playerName} — "{p.org}" (Pro)
-              </span>
-            ))}
-            {unresolvedNcaa.map((p) => (
-              <span key={p.playerName} className="rounded-full bg-accent-red/10 px-2.5 py-1 text-[11px] text-accent-red">
-                {p.playerName} — "{p.org}" (NCAA)
-              </span>
-            ))}
+          <div className="space-y-2">
+            {/* Group unresolved by unique org name */}
+            {[...new Set(unresolvedPro.map((p) => p.org))].map((org) => {
+              const orgPlayers = unresolvedPro.filter((p) => p.org === org)
+              return (
+                <div key={`pro-${org}`} className="flex items-center gap-3 rounded-lg border border-accent-red/20 bg-gray-950 px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <span className="text-sm font-medium text-accent-red">"{org}"</span>
+                    <span className="ml-2 text-xs text-text-dim">(Pro — {orgPlayers.map((p) => p.playerName).join(', ')})</span>
+                  </div>
+                  <select
+                    className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-text focus:border-accent-blue focus:outline-none"
+                    value=""
+                    onChange={(e) => {
+                      if (e.target.value) setCustomAlias('mlb', org, e.target.value)
+                    }}
+                  >
+                    <option value="">Map to MLB org...</option>
+                    {mlbOrgNames.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
+                </div>
+              )
+            })}
+            {[...new Set(unresolvedNcaa.map((p) => p.org))].map((org) => {
+              const orgPlayers = unresolvedNcaa.filter((p) => p.org === org)
+              return (
+                <div key={`ncaa-${org}`} className="flex items-center gap-3 rounded-lg border border-accent-red/20 bg-gray-950 px-3 py-2">
+                  <div className="min-w-0 flex-1">
+                    <span className="text-sm font-medium text-accent-red">"{org}"</span>
+                    <span className="ml-2 text-xs text-text-dim">(NCAA — {orgPlayers.map((p) => p.playerName).join(', ')})</span>
+                  </div>
+                  <select
+                    className="rounded-lg border border-border bg-surface px-3 py-1.5 text-sm text-text focus:border-accent-blue focus:outline-none"
+                    value=""
+                    onChange={(e) => {
+                      if (e.target.value) setCustomAlias('ncaa', org, e.target.value)
+                    }}
+                  >
+                    <option value="">Map to NCAA school...</option>
+                    {ncaaSchoolNames.map((name) => (
+                      <option key={name} value={name}>{name}</option>
+                    ))}
+                  </select>
+                </div>
+              )
+            })}
           </div>
         </div>
       )}
@@ -131,7 +196,7 @@ export default function ScheduleView() {
         {unassigned.length > 0 && (
           <div className="space-y-2">
             {unassigned.map((player) => {
-              const parentId = resolveMLBTeamId(player.org)
+              const parentId = resolveMLBTeamId(player.org, customMlbAliases)
               const teamOptions = parentId ? affiliatesByParent.get(parentId) ?? [] : []
 
               return (
@@ -195,7 +260,7 @@ export default function ScheduleView() {
           </p>
           <div className="grid gap-1 sm:grid-cols-2">
             {proPlayers.map((player) => {
-              const parentId = resolveMLBTeamId(player.org)
+              const parentId = resolveMLBTeamId(player.org, customMlbAliases)
               const site = parentId ? getSpringTrainingSite(parentId) : null
               if (!site) return null
               const drivable = parentId ? isGrapefruitLeague(parentId) : false
@@ -277,10 +342,62 @@ export default function ScheduleView() {
 
         {proGames.length > 0 && (
           <p className="mt-3 text-sm text-accent-green">
-            Loaded {proGames.length} games across assigned teams
+            Loaded {proGames.length} games across all affiliate levels
           </p>
         )}
       </div>
+
+      {/* Roster Moves Detection */}
+      {proPlayers.length > 0 && Object.keys(playerTeamAssignments).length > 0 && (
+        <div className="rounded-xl border border-border bg-surface p-5">
+          <div className="mb-3 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <h2 className="text-base font-semibold text-text">Roster Moves</h2>
+              {rosterMovesCheckedAt && (
+                <span className="rounded px-2 py-0.5 text-[10px] font-medium bg-accent-green/10 text-accent-green">
+                  checked {formatTimeAgo(new Date(rosterMovesCheckedAt).getTime())}
+                </span>
+              )}
+            </div>
+            <button
+              onClick={checkRosterMoves}
+              disabled={rosterMovesLoading}
+              className="rounded-lg bg-accent-blue px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-blue/80 disabled:opacity-50"
+            >
+              {rosterMovesLoading ? 'Checking...' : 'Check for Roster Moves'}
+            </button>
+          </div>
+          <p className="mb-3 text-xs text-text-dim">
+            Queries MLB transactions (last 30 days) to detect promotions, demotions, and trades for rostered players.
+          </p>
+
+          {rosterMoves.length > 0 && (
+            <div className="space-y-2">
+              {rosterMoves.map((move, i) => (
+                <div key={i} className="flex items-center gap-3 rounded-lg border border-accent-orange/30 bg-accent-orange/5 px-3 py-2">
+                  <span className="text-sm font-medium text-text">{move.player.fullName}</span>
+                  <span className="text-xs text-text-dim">
+                    {move.fromTeam?.name ?? '?'} → {move.toTeam?.name ?? '?'}
+                  </span>
+                  <span className="rounded bg-accent-orange/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-orange">
+                    {move.typeDesc}
+                  </span>
+                  <span className="ml-auto text-[11px] text-text-dim">
+                    {move.effectiveDate || move.date}
+                  </span>
+                </div>
+              ))}
+              <p className="text-[11px] text-text-dim/70">
+                These moves are detected from MLB transactions. Update the roster sheet to reflect permanent changes.
+              </p>
+            </div>
+          )}
+
+          {rosterMovesCheckedAt && rosterMoves.length === 0 && (
+            <p className="text-sm text-accent-green">No roster moves detected in the last 30 days.</p>
+          )}
+        </div>
+      )}
 
       {/* NCAA players section */}
       {ncaaPlayers.length > 0 && (
@@ -341,7 +458,7 @@ export default function ScheduleView() {
 
           <div className="grid gap-1 sm:grid-cols-2">
             {ncaaPlayers.map((player) => {
-              const canonical = resolveNcaaName(player.org)
+              const canonical = resolveNcaaName(player.org, customNcaaAliases)
               const venue = canonical ? NCAA_VENUES[canonical] : null
               const hasRealSchedule = ncaaGames.some((g) => g.playerNames.includes(player.playerName))
               return (
@@ -411,8 +528,106 @@ export default function ScheduleView() {
         </div>
       )}
 
-      {/* Calendar view */}
-      {proGames.length > 0 && <ScheduleCalendar games={proGames} />}
+      {/* All-source calendar */}
+      <AllSourceCalendar
+        proGames={proGames}
+        ncaaGames={ncaaGames}
+        players={players}
+        venueState={venueState}
+        sourceFilters={sourceFilters}
+        setSourceFilters={setSourceFilters}
+        customMlbAliases={customMlbAliases}
+        customNcaaAliases={customNcaaAliases}
+      />
+    </div>
+  )
+}
+
+function AllSourceCalendar({
+  proGames, ncaaGames, players, venueState, sourceFilters, setSourceFilters,
+  customMlbAliases, customNcaaAliases,
+}: {
+  proGames: GameEvent[]
+  ncaaGames: GameEvent[]
+  players: import('../../types/roster').RosterPlayer[]
+  venueState: Record<string, { name: string; coords: Coordinates; source: string }>
+  sourceFilters: Record<string, boolean>
+  setSourceFilters: (f: Record<string, boolean>) => void
+  customMlbAliases: Record<string, string>
+  customNcaaAliases: Record<string, string>
+}) {
+  const combinedGames = useMemo(() => {
+    const all: GameEvent[] = []
+
+    // Pro regular season games
+    if (sourceFilters.pro) {
+      all.push(...proGames.filter((g) => g.awayTeam !== 'Spring Training'))
+    }
+
+    // Spring Training events (subset of Pro or synthetic)
+    if (sourceFilters.st) {
+      // ST games from proGames
+      all.push(...proGames.filter((g) => g.awayTeam === 'Spring Training'))
+      // Synthetic ST events
+      const stEvents = generateSpringTrainingEvents(players, '2026-02-15', '2026-09-30', customMlbAliases)
+      // Avoid duplicates with proGames by checking IDs
+      const existingIds = new Set(all.map((g) => g.id))
+      for (const e of stEvents) {
+        if (!existingIds.has(e.id)) all.push(e)
+      }
+    }
+
+    // NCAA games (real from D1Baseball + synthetic for uncovered players)
+    if (sourceFilters.ncaa) {
+      all.push(...ncaaGames)
+      const ncaaPlayersWithReal = new Set(ncaaGames.flatMap((g) => g.playerNames))
+      const syntheticNcaa = generateNcaaEvents(
+        players.filter((p) => p.level === 'NCAA' && !ncaaPlayersWithReal.has(p.playerName)),
+        '2026-02-14', '2026-06-15',
+        customNcaaAliases,
+      )
+      all.push(...syntheticNcaa)
+    }
+
+    // HS events (synthetic)
+    if (sourceFilters.hs) {
+      const hsVenues = new Map<string, { name: string; coords: Coordinates }>()
+      for (const [key, v] of Object.entries(venueState)) {
+        if (v.source === 'hs-geocoded') {
+          hsVenues.set(key.replace(/^hs-/, ''), { name: v.name, coords: v.coords })
+        }
+      }
+      const hsEvents = generateHsEvents(players, '2026-02-14', '2026-05-15', hsVenues)
+      all.push(...hsEvents)
+    }
+
+    all.sort((a, b) => a.date.localeCompare(b.date))
+    return all
+  }, [proGames, ncaaGames, players, venueState, sourceFilters, customMlbAliases, customNcaaAliases])
+
+  const hasAnyGames = proGames.length > 0 || ncaaGames.length > 0 || players.some((p) => p.level === 'NCAA' || p.level === 'HS')
+
+  if (!hasAnyGames) return null
+
+  const toggleFilter = (key: string) => {
+    setSourceFilters({ ...sourceFilters, [key]: !sourceFilters[key] })
+  }
+
+  return (
+    <div>
+      {/* Source filter toggles */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <span className="text-xs font-medium text-text-dim">Show:</span>
+        <button onClick={() => toggleFilter('pro')} className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors border ${sourceFilters.pro ? 'bg-accent-blue/20 text-accent-blue border-accent-blue/30' : 'bg-gray-800 text-text-dim/50 border-border/30'}`}>Pro</button>
+        <button onClick={() => toggleFilter('st')} className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors border ${sourceFilters.st ? 'bg-pink-400/20 text-pink-400 border-pink-400/30' : 'bg-gray-800 text-text-dim/50 border-border/30'}`}>Spring Training</button>
+        <button onClick={() => toggleFilter('ncaa')} className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors border ${sourceFilters.ncaa ? 'bg-accent-green/20 text-accent-green border-accent-green/30' : 'bg-gray-800 text-text-dim/50 border-border/30'}`}>NCAA</button>
+        <button onClick={() => toggleFilter('hs')} className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors border ${sourceFilters.hs ? 'bg-accent-orange/20 text-accent-orange border-accent-orange/30' : 'bg-gray-800 text-text-dim/50 border-border/30'}`}>HS</button>
+        <span className="text-[11px] text-text-dim/50">
+          {combinedGames.length} events
+        </span>
+      </div>
+
+      <ScheduleCalendar games={combinedGames} />
     </div>
   )
 }

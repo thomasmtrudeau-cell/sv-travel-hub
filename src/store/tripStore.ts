@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 import type { Coordinates } from '../types/roster'
 import type { TripPlan } from '../types/schedule'
 import { generateTrips, generateSpringTrainingEvents, generateNcaaEvents, generateHsEvents, MAX_DRIVE_MINUTES } from '../lib/tripEngine'
@@ -21,6 +22,15 @@ function defaultEnd(): string {
   return toISO(d)
 }
 
+export type TripStatus = 'planned' | 'completed'
+
+// Stable trip key for status tracking across regeneration
+export function getTripKey(trip: import('../types/schedule').TripCandidate): string {
+  const anchorDate = trip.anchorGame.date
+  const venueKey = `${trip.anchorGame.venue.coords.lat.toFixed(4)},${trip.anchorGame.venue.coords.lng.toFixed(4)}`
+  return `trip-${anchorDate}-${venueKey}`
+}
+
 interface TripState {
   startDate: string
   endDate: string
@@ -30,14 +40,19 @@ interface TripState {
   computing: boolean
   progressStep: string
   progressDetail: string
+  tripStatuses: Record<string, TripStatus>
 
   setDateRange: (start: string, end: string) => void
   setMaxDriveMinutes: (minutes: number) => void
   setPriorityPlayers: (players: string[]) => void
   generateTrips: () => Promise<void>
+  clearTrips: () => void
+  setTripStatus: (tripKey: string, status: TripStatus | null) => void
 }
 
-export const useTripStore = create<TripState>((set, get) => ({
+export const useTripStore = create<TripState>()(
+  persist(
+    (set, get) => ({
   startDate: defaultStart(),
   endDate: defaultEnd(),
   maxDriveMinutes: MAX_DRIVE_MINUTES,
@@ -46,10 +61,21 @@ export const useTripStore = create<TripState>((set, get) => ({
   computing: false,
   progressStep: '',
   progressDetail: '',
+  tripStatuses: {},
 
   setDateRange: (startDate, endDate) => set({ startDate, endDate }),
   setMaxDriveMinutes: (maxDriveMinutes) => set({ maxDriveMinutes }),
   setPriorityPlayers: (priorityPlayers) => set({ priorityPlayers }),
+  clearTrips: () => set({ tripPlan: null }),
+  setTripStatus: (tripKey, status) => set((state) => {
+    const next = { ...state.tripStatuses }
+    if (status === null) {
+      delete next[tripKey]
+    } else {
+      next[tripKey] = status
+    }
+    return { tripStatuses: next }
+  }),
 
   generateTrips: async () => {
     const { startDate, endDate, maxDriveMinutes, priorityPlayers } = get()
@@ -58,8 +84,12 @@ export const useTripStore = create<TripState>((set, get) => ({
     const scheduledGames = scheduleState.proGames
     const realNcaaGames = scheduleState.ncaaGames
 
+    // Read custom aliases from schedule store
+    const customMlbAliases = scheduleState.customMlbAliases
+    const customNcaaAliases = scheduleState.customNcaaAliases
+
     // Merge scheduled games with spring training + NCAA + HS visit opportunities
-    const stEvents = generateSpringTrainingEvents(players, startDate, endDate)
+    const stEvents = generateSpringTrainingEvents(players, startDate, endDate, customMlbAliases)
 
     // Use real D1Baseball NCAA schedules if available, otherwise fall back to synthetic
     const ncaaPlayersWithRealSchedules = new Set(
@@ -70,6 +100,7 @@ export const useTripStore = create<TripState>((set, get) => ({
       players.filter((p) => p.level === 'NCAA' && !ncaaPlayersWithRealSchedules.has(p.playerName)),
       startDate,
       endDate,
+      customNcaaAliases,
     )
 
     // Build HS venue lookup from venue store
@@ -106,4 +137,17 @@ export const useTripStore = create<TripState>((set, get) => ({
       })
     }
   },
-}))
+}),
+    {
+      name: 'sv-travel-trips',
+      partialize: (state) => ({
+        tripPlan: state.tripPlan,
+        startDate: state.startDate,
+        endDate: state.endDate,
+        maxDriveMinutes: state.maxDriveMinutes,
+        priorityPlayers: state.priorityPlayers,
+        tripStatuses: state.tripStatuses,
+      }),
+    },
+  ),
+)

@@ -1,13 +1,14 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
-import type { MLBAffiliate, MLBGameRaw } from '../lib/mlbApi'
-import { fetchAllAffiliates, fetchAllSchedules } from '../lib/mlbApi'
+import type { MLBAffiliate, MLBGameRaw, MLBTransaction } from '../lib/mlbApi'
+import { fetchAllAffiliates, fetchAllSchedules, fetchAllTransactions } from '../lib/mlbApi'
 import { MLB_PARENT_IDS, resolveNcaaName } from '../data/aliases'
 import type { GameEvent } from '../types/schedule'
 import { extractVenueCoords } from '../lib/mlbApi'
 import type { D1Schedule } from '../lib/d1baseball'
 import { fetchAllD1Schedules, resolveOpponentVenue } from '../lib/d1baseball'
 import { NCAA_VENUES } from '../data/ncaaVenues'
+import { useRosterStore } from './rosterStore'
 
 interface PlayerTeamAssignment {
   teamId: number
@@ -24,6 +25,10 @@ interface ScheduleState {
   // Player → team assignments (persisted)
   playerTeamAssignments: Record<string, PlayerTeamAssignment>
 
+  // Custom aliases for unrecognized org names (persisted)
+  customMlbAliases: Record<string, string>   // raw name → canonical MLB org name
+  customNcaaAliases: Record<string, string>   // raw name → canonical NCAA school name
+
   // Pro schedules
   proSchedules: Record<number, MLBGameRaw[]> // teamId → games
   proGames: GameEvent[]
@@ -38,6 +43,11 @@ interface ScheduleState {
   ncaaError: string | null
   ncaaProgress: { completed: number; total: number } | null
 
+  // Roster moves detection
+  rosterMoves: MLBTransaction[]
+  rosterMovesLoading: boolean
+  rosterMovesCheckedAt: string | null
+
   // Fetch timestamps
   proFetchedAt: number | null
   ncaaFetchedAt: number | null
@@ -46,7 +56,10 @@ interface ScheduleState {
   fetchAffiliates: () => Promise<void>
   assignPlayerToTeam: (playerName: string, assignment: PlayerTeamAssignment) => void
   removePlayerAssignment: (playerName: string) => void
+  setCustomAlias: (type: 'mlb' | 'ncaa', raw: string, canonical: string) => void
   fetchProSchedules: (startDate: string, endDate: string) => Promise<void>
+  regenerateProGames: () => void
+  checkRosterMoves: () => Promise<void>
   fetchNcaaSchedules: (playerOrgs: Array<{ playerName: string; org: string }>) => Promise<void>
 }
 
@@ -73,6 +86,7 @@ function mlbGameToEvent(game: MLBGameRaw, teamId: number, playerNames: string[])
     playerNames,
     sportId: undefined,
     sourceUrl: `https://www.mlb.com/gameday/${game.gamePk}`,
+    gameStatus: game.status?.detailedState,
   }
 }
 
@@ -84,6 +98,8 @@ export const useScheduleStore = create<ScheduleState>()(
       affiliatesError: null,
 
       playerTeamAssignments: {},
+      customMlbAliases: {},
+      customNcaaAliases: {},
 
       proSchedules: {},
       proGames: [],
@@ -96,6 +112,10 @@ export const useScheduleStore = create<ScheduleState>()(
       ncaaLoading: false,
       ncaaError: null,
       ncaaProgress: null,
+
+      rosterMoves: [],
+      rosterMovesLoading: false,
+      rosterMovesCheckedAt: null,
 
       proFetchedAt: null,
       ncaaFetchedAt: null,
@@ -129,48 +149,117 @@ export const useScheduleStore = create<ScheduleState>()(
         })
       },
 
-      fetchProSchedules: async (startDate, endDate) => {
+      setCustomAlias: (type, raw, canonical) => {
+        if (type === 'mlb') {
+          set((state) => ({
+            customMlbAliases: { ...state.customMlbAliases, [raw]: canonical },
+          }))
+        } else {
+          set((state) => ({
+            customNcaaAliases: { ...state.customNcaaAliases, [raw]: canonical },
+          }))
+        }
+      },
+
+      regenerateProGames: () => {
         const state = get()
         const assignments = state.playerTeamAssignments
+        const allAffiliates = state.affiliates
+        const rawSchedules = state.proSchedules
 
-        // Collect unique teamId+sportId combos
-        const teamSet = new Map<number, { teamId: number; sportId: number; players: string[] }>()
+        // Rebuild player-to-parent-org mapping
+        const playersByParentOrg = new Map<number, string[]>()
         for (const [playerName, assignment] of Object.entries(assignments)) {
-          const existing = teamSet.get(assignment.teamId)
-          if (existing) {
-            existing.players.push(playerName)
-          } else {
-            teamSet.set(assignment.teamId, {
-              teamId: assignment.teamId,
-              sportId: assignment.sportId,
-              players: [playerName],
-            })
+          const aff = allAffiliates.find((a) => a.teamId === assignment.teamId)
+          const parentOrgId = aff?.parentOrgId
+          if (!parentOrgId) continue
+          const existing = playersByParentOrg.get(parentOrgId)
+          if (existing) existing.push(playerName)
+          else playersByParentOrg.set(parentOrgId, [playerName])
+        }
+
+        // Build team → parentOrg lookup
+        const teamToParentOrg = new Map<number, number>()
+        for (const aff of allAffiliates) {
+          teamToParentOrg.set(aff.teamId, aff.parentOrgId)
+        }
+
+        // Re-process cached raw game data
+        const allGames: GameEvent[] = []
+        const seenIds = new Set<string>()
+        for (const [teamIdStr, games] of Object.entries(rawSchedules)) {
+          const teamId = parseInt(teamIdStr)
+          const parentOrgId = teamToParentOrg.get(teamId)
+          if (!parentOrgId) continue
+          const orgPlayers = playersByParentOrg.get(parentOrgId) ?? []
+          if (orgPlayers.length === 0) continue
+
+          for (const game of games) {
+            const event = mlbGameToEvent(game, teamId, orgPlayers)
+            if (event && !seenIds.has(event.id)) {
+              seenIds.add(event.id)
+              allGames.push(event)
+            }
           }
         }
 
-        if (teamSet.size === 0) {
+        allGames.sort((a, b) => a.date.localeCompare(b.date))
+        set({ proGames: allGames })
+      },
+
+      fetchProSchedules: async (startDate, endDate) => {
+        const state = get()
+        const assignments = state.playerTeamAssignments
+        const allAffiliates = state.affiliates
+
+        // Collect players by parent org
+        const playersByParentOrg = new Map<number, string[]>()
+        for (const [playerName, assignment] of Object.entries(assignments)) {
+          // Find this team's parent org from affiliates
+          const aff = allAffiliates.find((a) => a.teamId === assignment.teamId)
+          const parentOrgId = aff?.parentOrgId
+          if (!parentOrgId) continue
+          const existing = playersByParentOrg.get(parentOrgId)
+          if (existing) existing.push(playerName)
+          else playersByParentOrg.set(parentOrgId, [playerName])
+        }
+
+        if (playersByParentOrg.size === 0) {
           set({ proGames: [], schedulesError: 'No players assigned to teams yet' })
           return
         }
 
-        set({ schedulesLoading: true, schedulesError: null, schedulesProgress: { completed: 0, total: teamSet.size } })
+        // For each parent org, get ALL affiliate teams (not just assigned ones)
+        const teamsToFetch: Array<{ teamId: number; sportId: number }> = []
+        const teamToParentOrg = new Map<number, number>()
+        for (const parentOrgId of playersByParentOrg.keys()) {
+          const orgAffiliates = allAffiliates.filter((a) => a.parentOrgId === parentOrgId)
+          for (const aff of orgAffiliates) {
+            if (!teamsToFetch.some((t) => t.teamId === aff.teamId)) {
+              teamsToFetch.push({ teamId: aff.teamId, sportId: aff.sportId })
+              teamToParentOrg.set(aff.teamId, parentOrgId)
+            }
+          }
+        }
+
+        set({ schedulesLoading: true, schedulesError: null, schedulesProgress: { completed: 0, total: teamsToFetch.length } })
 
         try {
-          const teams = [...teamSet.values()].map((t) => ({ teamId: t.teamId, sportId: t.sportId }))
-          const schedules = await fetchAllSchedules(teams, startDate, endDate, (completed, total) => {
+          const schedules = await fetchAllSchedules(teamsToFetch, startDate, endDate, (completed, total) => {
             set({ schedulesProgress: { completed, total } })
           })
 
-          // Convert to GameEvents
+          // Convert to GameEvents — attach all org players to each affiliate's games
           const allGames: GameEvent[] = []
           const seenIds = new Set<string>()
 
           for (const [teamId, games] of schedules.entries()) {
-            const teamInfo = teamSet.get(teamId)
-            if (!teamInfo) continue
+            const parentOrgId = teamToParentOrg.get(teamId)
+            if (!parentOrgId) continue
+            const orgPlayers = playersByParentOrg.get(parentOrgId) ?? []
 
             for (const game of games) {
-              const event = mlbGameToEvent(game, teamId, teamInfo.players)
+              const event = mlbGameToEvent(game, teamId, orgPlayers)
               if (event && !seenIds.has(event.id)) {
                 seenIds.add(event.id)
                 allGames.push(event)
@@ -201,11 +290,74 @@ export const useScheduleStore = create<ScheduleState>()(
           })
         }
       },
+      checkRosterMoves: async () => {
+        const state = get()
+        const assignments = state.playerTeamAssignments
+        const allAffiliates = state.affiliates
+
+        // Collect unique parent org IDs from assigned players
+        const parentOrgIds = new Set<number>()
+        for (const assignment of Object.values(assignments)) {
+          const aff = allAffiliates.find((a) => a.teamId === assignment.teamId)
+          if (aff?.parentOrgId) parentOrgIds.add(aff.parentOrgId)
+        }
+
+        if (parentOrgIds.size === 0) return
+
+        set({ rosterMovesLoading: true })
+
+        try {
+          // Look back 30 days
+          const endDate = new Date().toISOString().split('T')[0]!
+          const startDate = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]!
+
+          const transactions = await fetchAllTransactions(
+            [...parentOrgIds],
+            startDate,
+            endDate,
+          )
+
+          // Cross-reference: find transactions involving assigned players
+          const playerMlbIds = new Map<number, string>() // mlbPlayerId → playerName
+          const playerAssignedTeams = new Map<string, number>() // playerName → assigned teamId
+
+          const rosterPlayers = useRosterStore.getState().players
+
+          for (const player of rosterPlayers) {
+            if (player.level !== 'Pro' || !player.mlbPlayerId) continue
+            playerMlbIds.set(player.mlbPlayerId, player.playerName)
+            const assignment = assignments[player.playerName]
+            if (assignment) playerAssignedTeams.set(player.playerName, assignment.teamId)
+          }
+
+          // Filter transactions to only those involving our rostered players
+          const relevantMoves = transactions.filter((t) => {
+            const playerName = playerMlbIds.get(t.player.id)
+            if (!playerName) return false
+            // Check if the destination team differs from their current assignment
+            const assignedTeamId = playerAssignedTeams.get(playerName)
+            if (!assignedTeamId || !t.toTeam) return false
+            return t.toTeam.id !== assignedTeamId
+          })
+
+          set({
+            rosterMoves: relevantMoves,
+            rosterMovesLoading: false,
+            rosterMovesCheckedAt: new Date().toISOString(),
+          })
+        } catch (e) {
+          set({
+            rosterMovesLoading: false,
+          })
+          console.error('Failed to check roster moves:', e)
+        }
+      },
       fetchNcaaSchedules: async (playerOrgs) => {
         // Resolve each player's org to a canonical NCAA school name
+        const customNcaa = get().customNcaaAliases
         const schoolToPlayers = new Map<string, string[]>()
         for (const { playerName, org } of playerOrgs) {
-          const canonical = resolveNcaaName(org)
+          const canonical = resolveNcaaName(org, customNcaa)
           if (!canonical) continue
           const existing = schoolToPlayers.get(canonical)
           if (existing) existing.push(playerName)
@@ -298,6 +450,10 @@ export const useScheduleStore = create<ScheduleState>()(
         affiliates: state.affiliates,
         proFetchedAt: state.proFetchedAt,
         ncaaFetchedAt: state.ncaaFetchedAt,
+        customMlbAliases: state.customMlbAliases,
+        customNcaaAliases: state.customNcaaAliases,
+        rosterMoves: state.rosterMoves,
+        rosterMovesCheckedAt: state.rosterMovesCheckedAt,
       }),
     },
   ),

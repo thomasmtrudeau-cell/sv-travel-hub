@@ -146,6 +146,7 @@ export function generateSpringTrainingEvents(
   players: RosterPlayer[],
   startDate: string,
   endDate: string,
+  customMlbAliases?: Record<string, string>,
 ): GameEvent[] {
   const events: GameEvent[] = []
   const dates = getDatesInRange(startDate, endDate).filter(
@@ -158,7 +159,7 @@ export function generateSpringTrainingEvents(
   const playersByOrg = new Map<number, string[]>()
   for (const p of players) {
     if (p.level !== 'Pro' || p.visitsRemaining <= 0) continue
-    const orgId = resolveMLBTeamId(p.org)
+    const orgId = resolveMLBTeamId(p.org, customMlbAliases)
     if (!orgId) continue
     const existing = playersByOrg.get(orgId)
     if (existing) existing.push(p.playerName)
@@ -218,6 +219,7 @@ export function generateNcaaEvents(
   players: RosterPlayer[],
   startDate: string,
   endDate: string,
+  customNcaaAliases?: Record<string, string>,
 ): GameEvent[] {
   const events: GameEvent[] = []
   const dates = getDatesInRange(startDate, endDate).filter(
@@ -230,7 +232,7 @@ export function generateNcaaEvents(
   const playersBySchool = new Map<string, { players: string[]; venue: typeof NCAA_VENUES[string] }>()
   for (const p of players) {
     if (p.level !== 'NCAA' || p.visitsRemaining <= 0) continue
-    const canonical = resolveNcaaName(p.org)
+    const canonical = resolveNcaaName(p.org, customNcaaAliases)
     if (!canonical) continue
     const venue = NCAA_VENUES[canonical]
     if (!venue) continue
@@ -384,13 +386,15 @@ export async function generateTrips(
     players.filter((p) => p.visitsRemaining > 0).map((p) => p.playerName),
   )
 
-  // Filter games: no Sundays, within date range, with eligible players
+  // Filter games: no Sundays, within date range, with eligible players, exclude cancelled
   const eligibleGames = games.filter(
     (g) =>
       isDateAllowed(g.date) &&
       g.date >= startDate &&
       g.date <= endDate &&
-      g.playerNames.some((n) => eligiblePlayers.has(n)),
+      g.playerNames.some((n) => eligiblePlayers.has(n)) &&
+      g.gameStatus !== 'Cancelled' &&
+      g.gameStatus !== 'Canceled',
   )
 
   if (eligibleGames.length === 0) {
@@ -807,6 +811,92 @@ export async function generateTrips(
     priorityResults: priorityResults.length > 0 ? priorityResults : undefined,
     nearMisses: filteredNearMisses.length > 0 ? filteredNearMisses : undefined,
   }
+}
+
+// Analyze best weeks for travel based on T1+T2 player coverage
+export interface WeekSuggestion {
+  weekStart: string // ISO date (Monday)
+  weekEnd: string   // ISO date (Saturday)
+  t1Count: number
+  t2Count: number
+  totalScore: number
+}
+
+export function analyzeBestWeeks(
+  games: GameEvent[],
+  players: RosterPlayer[],
+  startDate: string,
+  endDate: string,
+  maxDriveMinutes: number = MAX_DRIVE_MINUTES,
+): WeekSuggestion[] {
+  const playerMap = new Map<string, RosterPlayer>()
+  for (const p of players) playerMap.set(p.playerName, p)
+
+  const eligiblePlayers = new Set(
+    players.filter((p) => p.visitsRemaining > 0).map((p) => p.playerName),
+  )
+
+  // Filter to drivable games with eligible players (not cancelled, not Sunday)
+  const eligibleGames = games.filter(
+    (g) =>
+      isDateAllowed(g.date) &&
+      g.date >= startDate &&
+      g.date <= endDate &&
+      g.playerNames.some((n) => eligiblePlayers.has(n)) &&
+      g.gameStatus !== 'Cancelled' &&
+      g.gameStatus !== 'Canceled' &&
+      g.venue.coords.lat !== 0 &&
+      g.venue.coords.lng !== 0 &&
+      estimateDriveMinutes(HOME_BASE, g.venue.coords) <= maxDriveMinutes,
+  )
+
+  // Build weeks (Mon-Sat) within the date range
+  const weeks: WeekSuggestion[] = []
+  const start = new Date(startDate + 'T12:00:00Z')
+  // Advance to next Monday
+  while (start.getUTCDay() !== 1) start.setUTCDate(start.getUTCDate() + 1)
+
+  const end = new Date(endDate + 'T12:00:00Z')
+
+  while (start < end) {
+    const weekStart = start.toISOString().split('T')[0]!
+    const sat = new Date(start)
+    sat.setUTCDate(sat.getUTCDate() + 5)
+    const weekEnd = sat.toISOString().split('T')[0]!
+
+    // Find all unique T1+T2 players with games this week
+    const weekPlayers = new Set<string>()
+    for (const g of eligibleGames) {
+      if (g.date >= weekStart && g.date <= weekEnd) {
+        for (const name of g.playerNames) {
+          if (eligiblePlayers.has(name)) weekPlayers.add(name)
+        }
+      }
+    }
+
+    let t1Count = 0, t2Count = 0
+    for (const name of weekPlayers) {
+      const tier = playerMap.get(name)?.tier
+      if (tier === 1) t1Count++
+      else if (tier === 2) t2Count++
+    }
+
+    if (t1Count + t2Count > 0) {
+      weeks.push({
+        weekStart,
+        weekEnd,
+        t1Count,
+        t2Count,
+        totalScore: t1Count * 5 + t2Count * 3,
+      })
+    }
+
+    start.setUTCDate(start.getUTCDate() + 7)
+  }
+
+  // Sort by totalScore descending, return top 3
+  weeks.sort((a, b) => b.totalScore - a.totalScore)
+  return weeks.slice(0, 3)
 }
 
 export { HOME_BASE, MAX_DRIVE_MINUTES }

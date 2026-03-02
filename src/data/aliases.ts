@@ -98,7 +98,18 @@ export const NCAA_ALIASES: Record<string, string[]> = {
 }
 
 // Reverse lookup: alias → canonical name
-export function resolveNcaaName(orgName: string): string | null {
+export function resolveNcaaName(orgName: string, customAliases?: Record<string, string>): string | null {
+  // Check custom aliases first (raw name → canonical name)
+  if (customAliases) {
+    const mapped = customAliases[orgName]
+    if (mapped) return mapped
+    // Case-insensitive custom check
+    const lower = orgName.toLowerCase().trim()
+    for (const [raw, canonical] of Object.entries(customAliases)) {
+      if (raw.toLowerCase().trim() === lower) return canonical
+    }
+  }
+
   const lower = orgName.toLowerCase().trim()
   for (const [canonical, aliases] of Object.entries(NCAA_ALIASES)) {
     if (canonical.toLowerCase() === lower) return canonical
@@ -108,7 +119,24 @@ export function resolveNcaaName(orgName: string): string | null {
 }
 
 // Resolve any org name to an MLB team ID (or null)
-export function resolveMLBTeamId(orgName: string): number | null {
+export function resolveMLBTeamId(orgName: string, customAliases?: Record<string, string>): number | null {
+  // Check custom aliases first (raw name → canonical MLB org name)
+  if (customAliases) {
+    const mapped = customAliases[orgName]
+    if (mapped) {
+      const resolved = MLB_ORG_IDS[mapped]
+      if (resolved !== undefined) return resolved
+    }
+    // Case-insensitive custom check
+    const lower = orgName.toLowerCase().trim()
+    for (const [raw, canonical] of Object.entries(customAliases)) {
+      if (raw.toLowerCase().trim() === lower) {
+        const resolved = MLB_ORG_IDS[canonical]
+        if (resolved !== undefined) return resolved
+      }
+    }
+  }
+
   // Direct match
   if (MLB_ORG_IDS[orgName] !== undefined) return MLB_ORG_IDS[orgName]!
   // Case-insensitive match
