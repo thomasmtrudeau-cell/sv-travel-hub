@@ -9,6 +9,7 @@ import type { MLBAffiliate } from '../../lib/mlbApi'
 import { useVenueStore } from '../../store/venueStore'
 import type { GameEvent } from '../../types/schedule'
 import type { Coordinates } from '../../types/roster'
+import { D1_BASEBALL_SLUGS } from '../../data/d1baseballSlugs'
 import ScheduleCalendar from './ScheduleCalendar'
 
 function formatTimeAgo(ts: number): string {
@@ -305,7 +306,7 @@ export default function ScheduleView() {
 
       {/* Schedule fetch controls */}
       <div className="rounded-xl border border-border bg-surface p-5">
-        <div className="mb-3 flex items-center gap-2">
+        <div className="mb-1 flex items-center gap-2">
           <h2 className="text-base font-semibold text-text">Pull Game Schedules</h2>
           {proFetchedAt && (
             <span className={`rounded px-2 py-0.5 text-[10px] font-medium ${
@@ -320,6 +321,9 @@ export default function ScheduleView() {
             <span className="rounded bg-gray-800 px-2 py-0.5 text-[10px] text-text-dim/60">Pro: never fetched</span>
           )}
         </div>
+        <p className="mb-3 text-xs text-text-dim">
+          Pick a date range and load every game for your connected Pro players. This covers all levels in each organization (MLB, AAA, AA, A, etc.) so you won't miss games if a player gets promoted or sent down.
+        </p>
         <div className="flex flex-wrap items-end gap-3">
           <div>
             <label className="mb-1 block text-xs text-text-dim">Start Date</label>
@@ -428,7 +432,7 @@ export default function ScheduleView() {
       {/* NCAA players section */}
       {ncaaPlayers.length > 0 && (
         <div className="rounded-xl border border-accent-green/30 bg-surface p-5">
-          <div className="mb-3 flex items-center justify-between">
+          <div className="mb-1 flex items-center justify-between">
             <div className="flex items-center gap-2">
               <h2 className="text-base font-semibold text-accent-green">College Players</h2>
               <span className="rounded-full bg-accent-green/15 px-2 py-0.5 text-[10px] font-medium text-accent-green">
@@ -440,7 +444,7 @@ export default function ScheduleView() {
                     ? 'bg-accent-orange/10 text-accent-orange'
                     : 'bg-accent-green/10 text-accent-green'
                 }`}>
-                  fetched {formatTimeAgo(ncaaFetchedAt)}
+                  loaded {formatTimeAgo(ncaaFetchedAt)}
                 </span>
               )}
               {isNcaaSeason(new Date().toISOString().slice(0, 10)) && (
@@ -454,14 +458,17 @@ export default function ScheduleView() {
               disabled={ncaaLoading}
               className="rounded-lg bg-accent-green px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-green/80 disabled:opacity-50"
             >
-              {ncaaLoading ? 'Loading games...' : ncaaGames.length > 0 ? 'Refresh Schedules' : 'Load College Schedules'}
+              {ncaaLoading ? 'Loading...' : ncaaGames.length > 0 ? 'Refresh All' : 'Load All Schedules'}
             </button>
           </div>
+          <p className="mb-3 text-xs text-text-dim">
+            Your college players and their home stadiums. Load schedules from D1Baseball to get real game dates — or load a specific school below. Without real data, the trip planner uses estimated home game days.
+          </p>
 
           {ncaaProgress && (
             <div className="mb-3">
               <div className="mb-1 text-xs text-text-dim">
-                Fetching schedules: {ncaaProgress.completed}/{ncaaProgress.total} schools
+                Loading schedules: {ncaaProgress.completed}/{ncaaProgress.total} schools
               </div>
               <div className="h-1.5 rounded-full bg-gray-800">
                 <div
@@ -478,7 +485,7 @@ export default function ScheduleView() {
 
           {ncaaGames.length > 0 && (
             <p className="mb-3 text-sm text-accent-green">
-              Loaded {ncaaGames.length} games ({ncaaGames.filter((g) => g.isHome).length} home, {ncaaGames.filter((g) => !g.isHome).length} away) from D1Baseball
+              Loaded {ncaaGames.length} games ({ncaaGames.filter((g) => g.isHome).length} home, {ncaaGames.filter((g) => !g.isHome).length} away)
             </p>
           )}
 
@@ -487,15 +494,37 @@ export default function ScheduleView() {
               const canonical = resolveNcaaName(player.org, customNcaaAliases)
               const venue = canonical ? NCAA_VENUES[canonical] : null
               const hasRealSchedule = ncaaGames.some((g) => g.playerNames.includes(player.playerName))
+              const slug = canonical ? D1_BASEBALL_SLUGS[canonical] : null
               return (
                 <div key={player.playerName} className="flex items-center justify-between rounded-lg bg-gray-950/50 px-3 py-1.5 text-sm">
                   <span className="text-text">{player.playerName}</span>
-                  <span className="text-xs text-text-dim">
+                  <span className="flex items-center gap-1.5 text-xs text-text-dim">
                     {venue ? (
-                      <span className="text-accent-green">
-                        {player.org} — {venue.venueName}
-                        {hasRealSchedule && <span className="ml-1 text-[10px] text-accent-blue">D1B</span>}
-                      </span>
+                      <>
+                        <span className="text-accent-green">
+                          {player.org} — {venue.venueName}
+                        </span>
+                        {hasRealSchedule && <span className="rounded bg-accent-blue/15 px-1 py-0.5 text-[10px] font-medium text-accent-blue">loaded</span>}
+                        {!hasRealSchedule && !ncaaLoading && (
+                          <button
+                            onClick={() => fetchNcaaSchedules([{ playerName: player.playerName, org: player.org }])}
+                            className="rounded bg-accent-green/15 px-1.5 py-0.5 text-[10px] font-medium text-accent-green hover:bg-accent-green/25 transition-colors"
+                          >
+                            Load
+                          </button>
+                        )}
+                        {slug && (
+                          <a
+                            href={`https://d1baseball.com/team/${slug}/schedule/`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="rounded bg-gray-800 px-1.5 py-0.5 text-[10px] font-medium text-text-dim hover:text-text transition-colors"
+                            title="View on D1Baseball"
+                          >
+                            D1B ↗
+                          </a>
+                        )}
+                      </>
                     ) : (
                       <span className="text-accent-orange">{player.org} — venue not mapped</span>
                     )}

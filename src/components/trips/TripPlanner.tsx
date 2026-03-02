@@ -57,7 +57,7 @@ function formatTimeAgo(ts: number): string {
 
 const STEPS = [
   { label: 'Load Roster', desc: 'Import players from Google Sheet', hint: 'Go to Roster tab to import' },
-  { label: 'Fetch Schedules', desc: 'Pull game schedules from all sources', hint: 'Click "Fetch Schedules" on the Schedule tab' },
+  { label: 'Load Schedules', desc: 'Pull game schedules from all sources', hint: 'Go to Data Setup tab and load game schedules' },
   { label: 'Set Dates', desc: 'Choose your travel window', hint: 'Set start and end dates below' },
   { label: 'Generate Trips', desc: 'Build optimized trip plans', hint: 'Click "Generate Trips" below' },
 ] as const
@@ -248,25 +248,25 @@ export default function TripPlanner() {
               ? proStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'
               : 'bg-gray-800 text-text-dim/60'
           }`}>
-            Pro: {proFetchedAt ? `fetched ${formatTimeAgo(proFetchedAt)}` : 'never fetched'}
+            Pro games: {proFetchedAt ? `loaded ${formatTimeAgo(proFetchedAt)}` : 'not loaded yet'}
           </span>
           <span className={`rounded px-2 py-0.5 ${
             ncaaFetchedAt
               ? ncaaStale ? 'bg-accent-orange/10 text-accent-orange' : 'bg-accent-green/10 text-accent-green'
               : 'bg-gray-800 text-text-dim/60'
           }`}>
-            NCAA: {ncaaFetchedAt ? `fetched ${formatTimeAgo(ncaaFetchedAt)}` : 'never fetched'}
+            College games: {ncaaFetchedAt ? `loaded ${formatTimeAgo(ncaaFetchedAt)}` : 'not loaded yet'}
           </span>
         </div>
 
         {showFreshnessWarning && (
           <div className="mb-4 rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-3 py-1.5">
             <p className="text-[11px] text-accent-orange">
-              {!proFetchedAt && hasProPlayers && 'Pro schedules never fetched. '}
-              {proStale && 'Pro schedules are stale (>24h). '}
-              {!ncaaFetchedAt && hasNcaaPlayers && 'NCAA schedules never fetched. '}
-              {ncaaStale && 'NCAA schedules are stale (>24h). '}
-              Refresh on the Schedule tab for the latest data.
+              {!proFetchedAt && hasProPlayers && 'Pro game schedules haven\'t been loaded yet. '}
+              {proStale && 'Pro game data is more than 24 hours old. '}
+              {!ncaaFetchedAt && hasNcaaPlayers && 'College game schedules haven\'t been loaded yet. '}
+              {ncaaStale && 'College game data is more than 24 hours old. '}
+              Go to the Data Setup tab to load or refresh game data.
             </p>
           </div>
         )}

@@ -27,4 +27,5 @@ export const D1_BASEBALL_SLUGS: Record<string, string> = {
   'Rutgers': 'rutgers',
   'Sacramento State': 'sacramento-state',
   'Saint Josephs': 'saint-josephs',
+  'Tulane': 'tulane',
 }
