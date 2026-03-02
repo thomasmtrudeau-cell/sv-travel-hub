@@ -122,6 +122,8 @@ export default function MapView() {
   const hsGeocodingError = useVenueStore((s) => s.hsGeocodingError)
   const proGames = useScheduleStore((s) => s.proGames)
   const tripPlan = useTripStore((s) => s.tripPlan)
+  const selectedTripIndex = useTripStore((s) => s.selectedTripIndex)
+  const setSelectedTripIndex = useTripStore((s) => s.setSelectedTripIndex)
   const players = useRosterStore((s) => s.players)
   const loadNcaaVenues = useVenueStore((s) => s.loadNcaaVenues)
   const loadSpringTrainingVenues = useVenueStore((s) => s.loadSpringTrainingVenues)
@@ -290,7 +292,9 @@ export default function MapView() {
 
     // Trip routes
     if (showTrips && tripPlan) {
-      for (const trip of tripPlan.trips) {
+      for (let ti = 0; ti < tripPlan.trips.length; ti++) {
+        const trip = tripPlan.trips[ti]!
+        const isSelected = selectedTripIndex === ti
         const points: [number, number][] = [
           [HOME_BASE.lat, HOME_BASE.lng],
           [trip.anchorGame.venue.coords.lat, trip.anchorGame.venue.coords.lng],
@@ -303,23 +307,52 @@ export default function MapView() {
         points.push([HOME_BASE.lat, HOME_BASE.lng])
 
         L.polyline(points, {
-          color: '#a78bfa',
-          weight: 2,
-          opacity: 0.7,
-          dashArray: '8 4',
+          color: isSelected ? '#60a5fa' : '#a78bfa',
+          weight: isSelected ? 3 : 2,
+          opacity: isSelected ? 1 : 0.5,
+          dashArray: isSelected ? undefined : '8 4',
         }).addTo(map)
 
-        // 3hr radius circle around anchor
-        L.circle([trip.anchorGame.venue.coords.lat, trip.anchorGame.venue.coords.lng], {
-          radius: 240000,
-          color: '#a78bfa',
-          weight: 1,
-          opacity: 0.3,
-          fillOpacity: 0.05,
-        }).addTo(map)
+        if (isSelected) {
+          // Numbered stop markers for the selected trip
+          const stops: Array<{ lat: number; lng: number; label: string }> = [
+            { lat: trip.anchorGame.venue.coords.lat, lng: trip.anchorGame.venue.coords.lng, label: trip.anchorGame.venue.name },
+          ]
+          for (const game of trip.nearbyGames) {
+            if (!stops.some((s) => Math.abs(s.lat - game.venue.coords.lat) < 0.001 && Math.abs(s.lng - game.venue.coords.lng) < 0.001)) {
+              stops.push({ lat: game.venue.coords.lat, lng: game.venue.coords.lng, label: game.venue.name })
+            }
+          }
+
+          for (let si = 0; si < stops.length; si++) {
+            const stop = stops[si]!
+            const stopIcon = L.divIcon({
+              html: `<div style="width:24px;height:24px;border-radius:50%;background:#60a5fa;color:white;font-weight:bold;font-size:12px;display:flex;align-items:center;justify-content:center;border:2px solid white;box-shadow:0 2px 4px rgba(0,0,0,0.5)">${si + 1}</div>`,
+              className: '',
+              iconSize: [24, 24],
+              iconAnchor: [12, 12],
+            })
+            L.marker([stop.lat, stop.lng], { icon: stopIcon })
+              .bindPopup(`<b>Stop ${si + 1}:</b> ${stop.label}`)
+              .addTo(map)
+          }
+
+          // Zoom to fit the selected trip
+          const bounds = L.latLngBounds(points.map(([lat, lng]) => [lat, lng] as [number, number]))
+          map.fitBounds(bounds, { padding: [50, 50] })
+        } else {
+          // Small radius circle for non-selected trips
+          L.circle([trip.anchorGame.venue.coords.lat, trip.anchorGame.venue.coords.lng], {
+            radius: 240000,
+            color: '#a78bfa',
+            weight: 1,
+            opacity: 0.2,
+            fillOpacity: 0.02,
+          }).addTo(map)
+        }
       }
     }
-  }, [venues, venuePlayerMap, tripPlan, showPro, showSt, showNcaa, showHs, showTrips, loaded])
+  }, [venues, venuePlayerMap, tripPlan, selectedTripIndex, showPro, showSt, showNcaa, showHs, showTrips, loaded])
 
   return (
     <div className="space-y-4">
@@ -331,6 +364,21 @@ export default function MapView() {
         <Toggle label={`HS Venues (${venueCounts.hs})`} color="bg-accent-orange" checked={showHs} onChange={setShowHs} />
         <Toggle label="Trip Routes" color="bg-accent-purple" checked={showTrips} onChange={setShowTrips} />
       </div>
+
+      {/* Selected trip indicator */}
+      {selectedTripIndex !== null && tripPlan?.trips[selectedTripIndex] && (
+        <div className="flex items-center justify-between rounded-xl border border-accent-blue/30 bg-accent-blue/5 p-3">
+          <span className="text-sm text-accent-blue">
+            Showing Trip #{selectedTripIndex + 1} route with numbered stops
+          </span>
+          <button
+            onClick={() => setSelectedTripIndex(null)}
+            className="rounded-lg bg-gray-800 px-3 py-1 text-xs font-medium text-text-dim hover:text-text"
+          >
+            Clear Selection
+          </button>
+        </div>
+      )}
 
       {/* Status messages */}
       <div className="flex flex-wrap gap-2">

@@ -7,6 +7,7 @@ import { isNcaaSeason, isHsSeason, analyzeBestWeeks, generateSpringTrainingEvent
 import { useVenueStore } from '../../store/venueStore'
 import type { Coordinates } from '../../types/roster'
 import TripCard, { generateItineraryText } from './TripCard'
+import { generateAllTripsIcs, downloadIcs } from '../../lib/icsExport'
 import PlayerSchedulePanel from '../roster/PlayerSchedulePanel'
 import { getTripKey } from '../../store/tripStore'
 import type { TripStatus } from '../../store/tripStore'
@@ -293,6 +294,45 @@ export default function TripPlanner() {
           </div>
         )}
 
+        {/* Quick date presets */}
+        <div className="mb-4 flex flex-wrap items-center gap-2">
+          <span className="text-[11px] text-text-dim">Quick:</span>
+          <button
+            onClick={() => {
+              const now = new Date()
+              const start = now.toISOString().split('T')[0]!
+              const end4 = new Date(now.getTime() + 28 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]!
+              setDateRange(start, end4)
+            }}
+            className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text transition-colors"
+          >
+            Next 4 weeks
+          </button>
+          <button
+            onClick={() => {
+              const now = new Date()
+              const start = now.toISOString().split('T')[0]!
+              const end8 = new Date(now.getTime() + 56 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]!
+              setDateRange(start, end8)
+            }}
+            className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text transition-colors"
+          >
+            Next 8 weeks
+          </button>
+          <button
+            onClick={() => setDateRange('2026-03-01', '2026-06-15')}
+            className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text transition-colors"
+          >
+            Spring (Mar–Jun)
+          </button>
+          <button
+            onClick={() => setDateRange('2026-03-01', '2026-09-30')}
+            className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text transition-colors"
+          >
+            Full Season
+          </button>
+        </div>
+
         <div className="flex flex-wrap items-end gap-3">
           <div>
             <label className="mb-1 block text-xs text-text-dim">Start Date</label>
@@ -508,12 +548,24 @@ export default function TripPlanner() {
                     Drivable from Orlando within {Math.floor(maxDriveMinutes / 60)}h{maxDriveMinutes % 60 > 0 ? ` ${maxDriveMinutes % 60}m` : ''} radius
                   </span>
                 </h3>
-                <button
-                  onClick={handleCopyAllTrips}
-                  className="rounded-lg bg-gray-800 px-3 py-1.5 text-xs font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors"
-                >
-                  {copiedAll ? 'Copied!' : 'Copy All Trips'}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={handleCopyAllTrips}
+                    className="rounded-lg bg-gray-800 px-3 py-1.5 text-xs font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors"
+                  >
+                    {copiedAll ? 'Copied!' : 'Copy All Trips'}
+                  </button>
+                  <button
+                    onClick={() => {
+                      const ics = generateAllTripsIcs(tripPlan.trips, playerMap)
+                      downloadIcs(ics, 'sv-travel-trips.ics')
+                    }}
+                    className="rounded-lg bg-gray-800 px-3 py-1.5 text-xs font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors"
+                    title="Download all trips as .ics calendar file"
+                  >
+                    Export .ics
+                  </button>
+                </div>
               </div>
 
               {/* Sort & filter toolbar — sticky */}
@@ -600,32 +652,68 @@ export default function TripPlanner() {
             )
           })()}
 
-          {/* Overlap warning */}
+          {/* Overlap warning with comparison */}
           {tripPlan.trips.length > 1 && (() => {
-            const overlaps: Array<{ tripA: number; tripB: number; dates: string[] }> = []
+            const overlaps: Array<{ tripA: number; tripB: number; dates: string[]; uniqueA: string[]; uniqueB: string[]; shared: string[] }> = []
             for (let a = 0; a < tripPlan.trips.length; a++) {
               for (let b = a + 1; b < tripPlan.trips.length; b++) {
                 const daysA = new Set(tripPlan.trips[a]!.suggestedDays)
-                const shared = tripPlan.trips[b]!.suggestedDays.filter((d) => daysA.has(d))
-                if (shared.length > 0) {
-                  overlaps.push({ tripA: a + 1, tripB: b + 1, dates: shared })
+                const sharedDates = tripPlan.trips[b]!.suggestedDays.filter((d) => daysA.has(d))
+                if (sharedDates.length > 0) {
+                  // Compare players between the two trips
+                  const playersA = new Set([
+                    ...tripPlan.trips[a]!.anchorGame.playerNames,
+                    ...tripPlan.trips[a]!.nearbyGames.flatMap((g) => g.playerNames),
+                  ])
+                  const playersB = new Set([
+                    ...tripPlan.trips[b]!.anchorGame.playerNames,
+                    ...tripPlan.trips[b]!.nearbyGames.flatMap((g) => g.playerNames),
+                  ])
+                  const shared = [...playersA].filter((n) => playersB.has(n))
+                  const uniqueA = [...playersA].filter((n) => !playersB.has(n))
+                  const uniqueB = [...playersB].filter((n) => !playersA.has(n))
+                  overlaps.push({ tripA: a + 1, tripB: b + 1, dates: sharedDates, uniqueA, uniqueB, shared })
                 }
               }
             }
             if (overlaps.length === 0) return null
             return (
               <div className="rounded-xl border border-accent-orange/30 bg-accent-orange/5 p-4">
-                <h3 className="mb-2 text-sm font-semibold text-accent-orange">Trip Date Overlaps</h3>
-                <div className="space-y-1">
+                <h3 className="mb-2 text-sm font-semibold text-accent-orange">Trip Date Overlaps — Choose One</h3>
+                <div className="space-y-4">
                   {overlaps.map((o, i) => (
-                    <p key={i} className="text-xs text-text-dim">
-                      <span className="font-medium text-accent-orange">Trips #{o.tripA} and #{o.tripB}</span> overlap on{' '}
-                      {o.dates.map((d) => {
-                        const dt = new Date(d + 'T12:00:00Z')
-                        return `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dt.getUTCDay()]} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][dt.getUTCMonth()]} ${dt.getUTCDate()}`
-                      }).join(', ')}
-                      {' '}— you can only take one.
-                    </p>
+                    <div key={i} className="rounded-lg border border-border/30 bg-gray-950/30 p-3">
+                      <p className="mb-2 text-xs text-text-dim">
+                        <span className="font-medium text-accent-orange">Trips #{o.tripA} and #{o.tripB}</span> overlap on{' '}
+                        {o.dates.map((d) => {
+                          const dt = new Date(d + 'T12:00:00Z')
+                          return `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dt.getUTCDay()]} ${['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][dt.getUTCMonth()]} ${dt.getUTCDate()}`
+                        }).join(', ')}
+                      </p>
+                      <div className="grid grid-cols-3 gap-2 text-[11px]">
+                        <div>
+                          <p className="mb-1 font-medium text-accent-blue">Only in #{o.tripA}</p>
+                          {o.uniqueA.length > 0 ? o.uniqueA.map((n) => {
+                            const p = playerMap.get(n)
+                            return <p key={n} className="text-text-dim">{n} {p ? `(T${p.tier})` : ''}</p>
+                          }) : <p className="text-text-dim/50">None</p>}
+                        </div>
+                        <div>
+                          <p className="mb-1 font-medium text-text-dim">Shared</p>
+                          {o.shared.length > 0 ? o.shared.map((n) => {
+                            const p = playerMap.get(n)
+                            return <p key={n} className="text-text-dim">{n} {p ? `(T${p.tier})` : ''}</p>
+                          }) : <p className="text-text-dim/50">None</p>}
+                        </div>
+                        <div>
+                          <p className="mb-1 font-medium text-accent-green">Only in #{o.tripB}</p>
+                          {o.uniqueB.length > 0 ? o.uniqueB.map((n) => {
+                            const p = playerMap.get(n)
+                            return <p key={n} className="text-text-dim">{n} {p ? `(T${p.tier})` : ''}</p>
+                          }) : <p className="text-text-dim/50">None</p>}
+                        </div>
+                      </div>
+                    </div>
                   ))}
                 </div>
               </div>

@@ -78,6 +78,58 @@ export function extractVenueCoords(game: MLBGameRaw): Coordinates | null {
   return { lat: loc.latitude, lng: loc.longitude }
 }
 
+// Fetch current roster for a team (returns player IDs and names)
+export interface MLBRosterEntry {
+  playerId: number
+  fullName: string
+  teamId: number
+  teamName: string
+  sportId: number
+}
+
+export async function fetchTeamRoster(teamId: number, sportId: number): Promise<MLBRosterEntry[]> {
+  const url = `${MLB_BASE}/teams/${teamId}/roster?rosterType=fullRoster`
+  const res = await fetch(url)
+  if (!res.ok) return [] // Some teams may not have rosters available
+  const data = await res.json()
+
+  return (data.roster ?? []).map((entry: Record<string, unknown>) => {
+    const person = entry.person as Record<string, unknown> | undefined
+    return {
+      playerId: (person?.id as number) ?? 0,
+      fullName: (person?.fullName as string) ?? '',
+      teamId,
+      teamName: '', // Will be filled in by caller
+      sportId,
+    }
+  })
+}
+
+// Batch fetch rosters for multiple teams
+export async function fetchAllRosters(
+  teams: Array<{ teamId: number; sportId: number; teamName: string }>,
+  onProgress?: (completed: number, total: number) => void,
+): Promise<MLBRosterEntry[]> {
+  const all: MLBRosterEntry[] = []
+  const concurrency = 5
+  let completed = 0
+
+  for (let i = 0; i < teams.length; i += concurrency) {
+    const batch = teams.slice(i, i + concurrency)
+    const results = await Promise.all(
+      batch.map(async (t) => {
+        const roster = await fetchTeamRoster(t.teamId, t.sportId)
+        return roster.map((r) => ({ ...r, teamName: t.teamName }))
+      }),
+    )
+    for (const entries of results) all.push(...entries)
+    completed += batch.length
+    onProgress?.(completed, teams.length)
+  }
+
+  return all
+}
+
 // Batch fetch all affiliates for multiple parent orgs
 // Rate limited to 5 concurrent requests
 export async function fetchAllAffiliates(

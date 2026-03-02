@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useRosterStore } from '../../store/rosterStore'
 import { useTripStore, getTripKey } from '../../store/tripStore'
 import type { TripCandidate, VisitConfidence, ScheduleSource } from '../../types/schedule'
+import { generateTripIcs, downloadIcs } from '../../lib/icsExport'
 import type { TripStatus } from '../../store/tripStore'
 import type { RosterPlayer } from '../../types/roster'
 
@@ -252,6 +253,7 @@ export default function TripCard({ trip, index, defaultExpanded = false, onPlaye
   const tripKey = getTripKey(trip)
   const tripStatuses = useTripStore((s) => s.tripStatuses)
   const setTripStatus = useTripStore((s) => s.setTripStatus)
+  const setSelectedTripIndex = useTripStore((s) => s.setSelectedTripIndex)
   const currentStatus = tripStatuses[tripKey] as TripStatus | undefined
 
   function cycleStatus(e: React.MouseEvent) {
@@ -316,6 +318,12 @@ export default function TripCard({ trip, index, defaultExpanded = false, onPlaye
     setTimeout(() => setCopied(false), 2000)
   }
 
+  function handleExportCalendar(e: React.MouseEvent) {
+    e.stopPropagation()
+    const ics = generateTripIcs(trip, index, playerMap)
+    downloadIcs(ics, `sv-trip-${index}.ics`)
+  }
+
   return (
     <div className="rounded-xl border border-border bg-surface p-5">
       {/* Header — always visible, clickable to expand/collapse */}
@@ -362,6 +370,20 @@ export default function TripCard({ trip, index, defaultExpanded = false, onPlaye
             title="Copy trip itinerary to clipboard"
           >
             {copied ? 'Copied!' : 'Copy'}
+          </button>
+          <button
+            onClick={handleExportCalendar}
+            className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors"
+            title="Download .ics calendar file"
+          >
+            .ics
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); setSelectedTripIndex(index - 1) }}
+            className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text hover:bg-gray-700 transition-colors"
+            title="Highlight this trip on the Map tab"
+          >
+            Map
           </button>
           <div className="rounded-lg bg-accent-blue/10 px-2.5 py-1">
             <span className="text-sm font-bold text-accent-blue">{allPlayers.size}</span>

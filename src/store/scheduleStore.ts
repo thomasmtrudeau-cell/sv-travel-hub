@@ -1,8 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import type { MLBAffiliate, MLBGameRaw, MLBTransaction } from '../lib/mlbApi'
-import { fetchAllAffiliates, fetchAllSchedules, fetchAllTransactions } from '../lib/mlbApi'
-import { MLB_PARENT_IDS, resolveNcaaName } from '../data/aliases'
+import { fetchAllAffiliates, fetchAllSchedules, fetchAllTransactions, fetchAllRosters } from '../lib/mlbApi'
+import { MLB_PARENT_IDS, resolveNcaaName, resolveMLBTeamId } from '../data/aliases'
 import type { GameEvent } from '../types/schedule'
 import { extractVenueCoords } from '../lib/mlbApi'
 import type { D1Schedule } from '../lib/d1baseball'
@@ -52,11 +52,16 @@ interface ScheduleState {
   proFetchedAt: number | null
   ncaaFetchedAt: number | null
 
+  // Auto-assign
+  autoAssignLoading: boolean
+  autoAssignResult: { assigned: number; notFound: string[] } | null
+
   // Actions
   fetchAffiliates: () => Promise<void>
   assignPlayerToTeam: (playerName: string, assignment: PlayerTeamAssignment) => void
   removePlayerAssignment: (playerName: string) => void
   setCustomAlias: (type: 'mlb' | 'ncaa', raw: string, canonical: string) => void
+  autoAssignPlayers: () => Promise<void>
   fetchProSchedules: (startDate: string, endDate: string) => Promise<void>
   regenerateProGames: () => void
   checkRosterMoves: () => Promise<void>
@@ -113,6 +118,9 @@ export const useScheduleStore = create<ScheduleState>()(
       ncaaError: null,
       ncaaProgress: null,
 
+      autoAssignLoading: false,
+      autoAssignResult: null,
+
       rosterMoves: [],
       rosterMovesLoading: false,
       rosterMovesCheckedAt: null,
@@ -158,6 +166,86 @@ export const useScheduleStore = create<ScheduleState>()(
           set((state) => ({
             customNcaaAliases: { ...state.customNcaaAliases, [raw]: canonical },
           }))
+        }
+      },
+
+      autoAssignPlayers: async () => {
+        const state = get()
+        const allAffiliates = state.affiliates
+        const customMlb = state.customMlbAliases
+        const rosterPlayers = useRosterStore.getState().players
+
+        // Get Pro players that need assignment
+        const proPlayers = rosterPlayers.filter(
+          (p) => p.level === 'Pro' && p.mlbPlayerId && !state.playerTeamAssignments[p.playerName],
+        )
+
+        if (proPlayers.length === 0) {
+          set({ autoAssignResult: { assigned: 0, notFound: [] } })
+          return
+        }
+
+        // Collect unique parent org IDs for these players
+        const parentOrgIds = new Set<number>()
+        for (const p of proPlayers) {
+          const orgId = resolveMLBTeamId(p.org, customMlb)
+          if (orgId) parentOrgIds.add(orgId)
+        }
+
+        if (parentOrgIds.size === 0) {
+          set({ autoAssignResult: { assigned: 0, notFound: proPlayers.map((p) => p.playerName) } })
+          return
+        }
+
+        set({ autoAssignLoading: true, autoAssignResult: null })
+
+        try {
+          // Get all affiliate teams for these parent orgs
+          const teamsToQuery = allAffiliates
+            .filter((a) => parentOrgIds.has(a.parentOrgId))
+            .map((a) => ({ teamId: a.teamId, sportId: a.sportId, teamName: a.teamName }))
+
+          // Fetch rosters for all affiliate teams
+          const rosterEntries = await fetchAllRosters(teamsToQuery)
+
+          // Build mlbPlayerId → team assignment lookup
+          const playerIdToTeam = new Map<number, PlayerTeamAssignment>()
+          for (const entry of rosterEntries) {
+            if (entry.playerId > 0) {
+              playerIdToTeam.set(entry.playerId, {
+                teamId: entry.teamId,
+                sportId: entry.sportId,
+                teamName: entry.teamName,
+              })
+            }
+          }
+
+          // Match our roster players
+          const newAssignments: Record<string, PlayerTeamAssignment> = { ...state.playerTeamAssignments }
+          let assignedCount = 0
+          const notFoundNames: string[] = []
+
+          for (const player of proPlayers) {
+            const match = playerIdToTeam.get(player.mlbPlayerId!)
+            if (match) {
+              newAssignments[player.playerName] = match
+              assignedCount++
+            } else {
+              notFoundNames.push(player.playerName)
+            }
+          }
+
+          set({
+            playerTeamAssignments: newAssignments,
+            autoAssignLoading: false,
+            autoAssignResult: { assigned: assignedCount, notFound: notFoundNames },
+          })
+        } catch (e) {
+          set({
+            autoAssignLoading: false,
+            autoAssignResult: { assigned: 0, notFound: proPlayers.map((p) => p.playerName) },
+          })
+          console.error('Auto-assign failed:', e)
         }
       },
 
@@ -454,6 +542,10 @@ export const useScheduleStore = create<ScheduleState>()(
         customNcaaAliases: state.customNcaaAliases,
         rosterMoves: state.rosterMoves,
         rosterMovesCheckedAt: state.rosterMovesCheckedAt,
+        proSchedules: state.proSchedules,
+        proGames: state.proGames,
+        ncaaSchedules: state.ncaaSchedules,
+        ncaaGames: state.ncaaGames,
       }),
     },
   ),

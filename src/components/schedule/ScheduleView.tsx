@@ -53,6 +53,9 @@ export default function ScheduleView() {
   const rosterMovesLoading = useScheduleStore((s) => s.rosterMovesLoading)
   const rosterMovesCheckedAt = useScheduleStore((s) => s.rosterMovesCheckedAt)
   const checkRosterMoves = useScheduleStore((s) => s.checkRosterMoves)
+  const autoAssignPlayers = useScheduleStore((s) => s.autoAssignPlayers)
+  const autoAssignLoading = useScheduleStore((s) => s.autoAssignLoading)
+  const autoAssignResult = useScheduleStore((s) => s.autoAssignResult)
 
   const [startDate, setStartDate] = useState('2026-03-01')
   const [endDate, setEndDate] = useState('2026-09-30')
@@ -178,13 +181,36 @@ export default function ScheduleView() {
               )}
             </p>
           </div>
-          {affiliatesLoading && (
-            <span className="flex items-center gap-2 text-xs text-text-dim">
-              <span className="h-3 w-3 animate-spin rounded-full border border-text-dim border-t-transparent" />
-              Loading affiliates...
-            </span>
-          )}
+          <div className="flex items-center gap-2">
+            {affiliatesLoading && (
+              <span className="flex items-center gap-2 text-xs text-text-dim">
+                <span className="h-3 w-3 animate-spin rounded-full border border-text-dim border-t-transparent" />
+                Loading affiliates...
+              </span>
+            )}
+            {unassigned.length > 0 && affiliates.length > 0 && (
+              <button
+                onClick={autoAssignPlayers}
+                disabled={autoAssignLoading}
+                className="rounded-lg bg-accent-green px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-green/80 disabled:opacity-50"
+              >
+                {autoAssignLoading ? 'Scanning rosters...' : 'Auto-Assign'}
+              </button>
+            )}
+          </div>
         </div>
+
+        {autoAssignResult && (
+          <div className={`mb-3 rounded-lg px-3 py-2 text-sm ${autoAssignResult.assigned > 0 ? 'border border-accent-green/30 bg-accent-green/5 text-accent-green' : 'border border-accent-orange/30 bg-accent-orange/5 text-accent-orange'}`}>
+            {autoAssignResult.assigned > 0 && `Auto-assigned ${autoAssignResult.assigned} player${autoAssignResult.assigned !== 1 ? 's' : ''} from MLB rosters. `}
+            {autoAssignResult.notFound.length > 0 && (
+              <span className="text-text-dim">
+                Not found on any roster: {autoAssignResult.notFound.join(', ')}
+              </span>
+            )}
+            {autoAssignResult.assigned === 0 && autoAssignResult.notFound.length === 0 && 'All Pro players already assigned.'}
+          </div>
+        )}
 
         {affiliatesError && (
           <div className="mb-4 rounded-lg border border-accent-red/30 bg-accent-red/5 px-4 py-2 text-sm text-accent-red">

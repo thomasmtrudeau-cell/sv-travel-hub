@@ -41,6 +41,7 @@ interface TripState {
   progressStep: string
   progressDetail: string
   tripStatuses: Record<string, TripStatus>
+  selectedTripIndex: number | null // For map preview highlighting
 
   setDateRange: (start: string, end: string) => void
   setMaxDriveMinutes: (minutes: number) => void
@@ -48,6 +49,7 @@ interface TripState {
   generateTrips: () => Promise<void>
   clearTrips: () => void
   setTripStatus: (tripKey: string, status: TripStatus | null) => void
+  setSelectedTripIndex: (index: number | null) => void
 }
 
 export const useTripStore = create<TripState>()(
@@ -62,11 +64,13 @@ export const useTripStore = create<TripState>()(
   progressStep: '',
   progressDetail: '',
   tripStatuses: {},
+  selectedTripIndex: null,
 
   setDateRange: (startDate, endDate) => set({ startDate, endDate }),
   setMaxDriveMinutes: (maxDriveMinutes) => set({ maxDriveMinutes }),
   setPriorityPlayers: (priorityPlayers) => set({ priorityPlayers }),
-  clearTrips: () => set({ tripPlan: null }),
+  clearTrips: () => set({ tripPlan: null, selectedTripIndex: null }),
+  setSelectedTripIndex: (selectedTripIndex) => set({ selectedTripIndex }),
   setTripStatus: (tripKey, status) => set((state) => {
     const next = { ...state.tripStatuses }
     if (status === null) {
