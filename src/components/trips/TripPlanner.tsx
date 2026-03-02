@@ -300,24 +300,33 @@ export default function TripPlanner() {
           <button
             onClick={() => {
               const now = new Date()
-              const start = now.toISOString().split('T')[0]!
-              const end4 = new Date(now.getTime() + 28 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]!
-              setDateRange(start, end4)
+              // Start of this week (Monday)
+              const day = now.getDay()
+              const diffToMon = day === 0 ? -6 : 1 - day
+              const mon = new Date(now)
+              mon.setDate(now.getDate() + diffToMon)
+              const sat = new Date(mon)
+              sat.setDate(mon.getDate() + 5)
+              setDateRange(mon.toISOString().split('T')[0]!, sat.toISOString().split('T')[0]!)
             }}
             className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text transition-colors"
           >
-            Next 4 weeks
+            This week
           </button>
           <button
             onClick={() => {
               const now = new Date()
-              const start = now.toISOString().split('T')[0]!
-              const end8 = new Date(now.getTime() + 56 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]!
-              setDateRange(start, end8)
+              const day = now.getDay()
+              const diffToNextMon = day === 0 ? 1 : 8 - day
+              const mon = new Date(now)
+              mon.setDate(now.getDate() + diffToNextMon)
+              const sat = new Date(mon)
+              sat.setDate(mon.getDate() + 5)
+              setDateRange(mon.toISOString().split('T')[0]!, sat.toISOString().split('T')[0]!)
             }}
             className="rounded-lg bg-gray-800 px-2.5 py-1 text-[11px] font-medium text-text-dim hover:text-text transition-colors"
           >
-            Next 8 weeks
+            Next week
           </button>
           <button
             onClick={() => setDateRange('2026-03-01', '2026-06-15')}
