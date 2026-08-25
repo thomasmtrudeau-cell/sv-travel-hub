@@ -23,7 +23,7 @@ export interface PlayerTeamAssignment {
   sportId: number
   teamName: string
   /** How this assignment was determined */
-  source?: 'milb-roster' | 'mlb-roster' | 'estimated' | 'manual'
+  source?: 'milb-roster' | 'mlb-roster' | 'mlb-il' | 'estimated' | 'manual'
 }
 
 // Activity log entry — tracks visible changes for transparency
@@ -348,6 +348,26 @@ export const useScheduleStore = create<ScheduleState>()(
             }
           }
 
+          // Injured-list fallback. MLB players on the 10/15/60-day IL are NOT
+          // on the active roster, so they vanished from the hub entirely
+          // (Garrett Whitlock, 15-day IL, 2026-08-25 — Kent expected to see
+          // him with Boston in Miami). Pull the 40-man and keep only "D*"
+          // (injured) statuses — optioned / reassigned players still fall
+          // through to the MiLB roster lookup below. Used only as a last
+          // resort after active + MiLB rosters miss, so a rehab assignment
+          // at an affiliate still wins.
+          const mlb40Result = await fetchAllRosters(mlbTeamsToQuery, undefined, undefined, '40Man')
+          const mlbIlPlayerIdToTeam = new Map<number, PlayerTeamAssignment>()
+          for (const entry of mlb40Result.entries) {
+            if (entry.playerId > 0 && entry.statusCode && entry.statusCode.startsWith('D')) {
+              mlbIlPlayerIdToTeam.set(entry.playerId, {
+                teamId: entry.teamId,
+                sportId: 1,
+                teamName: entry.teamName,
+              })
+            }
+          }
+
           // Phase 2: ALWAYS check MiLB rosters — a player on the 40-man may be
           // optioned to the minors and should use the MiLB team's schedule, not MLB.
           // Hoist milbRosterEntries so Phase 3 can also use them for name matching
@@ -539,8 +559,14 @@ export const useScheduleStore = create<ScheduleState>()(
 
             // Fall back to MLB roster (ACTIVE roster — a real call-up)
             const mlbMatch2 = mlbPlayerIdToTeam.get(player.mlbPlayerId!)
+            const ilMatch = mlbIlPlayerIdToTeam.get(player.mlbPlayerId!)
             if (mlbMatch2) {
               newAssignments[player.playerName] = { ...mlbMatch2, source: 'mlb-roster' }
+              assignedCount++
+            } else if (ilMatch) {
+              // On the injured list with the big-league club — travels with
+              // the team, so show the club's schedule.
+              newAssignments[player.playerName] = { ...ilMatch, source: 'mlb-il' }
               assignedCount++
             } else {
               remainingPlayers.push(player)

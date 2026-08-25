@@ -128,6 +128,9 @@ export interface MLBRosterEntry {
   sportId: number
   /** Position code from the roster API. "P" = pitcher; otherwise position player. */
   positionCode?: string
+  /** Roster status code from the API: "A" active, "D10"/"D15"/"D60" injured
+   *  list, "RM" reassigned to minors, etc. Only populated for 40Man fetches. */
+  statusCode?: string
 }
 
 export async function fetchTeamRoster(teamId: number, sportId: number, season?: number, rosterType: string = 'fullRoster'): Promise<MLBRosterEntry[]> {
@@ -145,6 +148,7 @@ export async function fetchTeamRoster(teamId: number, sportId: number, season?: 
   return (data.roster ?? []).map((entry: Record<string, unknown>) => {
     const person = entry.person as Record<string, unknown> | undefined
     const position = entry.position as Record<string, unknown> | undefined
+    const status = entry.status as Record<string, unknown> | undefined
     return {
       playerId: (person?.id as number) ?? 0,
       fullName: (person?.fullName as string) ?? '',
@@ -152,6 +156,7 @@ export async function fetchTeamRoster(teamId: number, sportId: number, season?: 
       teamName: '', // Will be filled in by caller
       sportId,
       positionCode: (position?.code as string) ?? undefined,
+      statusCode: (status?.code as string) ?? undefined,
     }
   })
 }

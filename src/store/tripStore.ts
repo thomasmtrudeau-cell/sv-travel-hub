@@ -79,6 +79,13 @@ interface TripState {
   startDate: string
   endDate: string
   maxDriveMinutes: number
+  /** Kent 2026-08-25: "a turn off button for the radius so I can just see
+   *  the general location of players that week". When false the dashed
+   *  circle is hidden and the planner's facts table shows every game on
+   *  the dates (distances still labeled). Drivable double-up pairing and
+   *  the trip engine keep using maxDriveMinutes — that is a pairing
+   *  distance, not a view filter. */
+  radiusEnabled: boolean
   maxFlightHours: number
   useHeartbeatBoost: boolean
   priorityPlayers: string[]
@@ -120,6 +127,7 @@ interface TripState {
 
   setDateRange: (start: string, end: string) => void
   setMaxDriveMinutes: (minutes: number) => void
+  setRadiusEnabled: (enabled: boolean) => void
   setMaxFlightHours: (hours: number) => void
   setPriorityPlayers: (players: string[]) => void
   setHomeBase: (coords: Coordinates, name: string) => void
@@ -148,6 +156,7 @@ export const useTripStore = create<TripState>()(
   startDate: defaultStart(),
   endDate: defaultEnd(),
   maxDriveMinutes: MAX_DRIVE_MINUTES,
+  radiusEnabled: true,
   maxFlightHours: 4,
   useHeartbeatBoost: false, // default OFF — Heartbeat data is a snapshot of now, not the future
   priorityPlayers: [],
@@ -174,7 +183,8 @@ export const useTripStore = create<TripState>()(
     const e = endDate < today ? today : endDate
     set({ startDate: s, endDate: e })
   },
-  setMaxDriveMinutes: (maxDriveMinutes) => set({ maxDriveMinutes }),
+  setMaxDriveMinutes: (maxDriveMinutes) => set({ maxDriveMinutes, radiusEnabled: true }),
+  setRadiusEnabled: (radiusEnabled) => set({ radiusEnabled }),
   setMaxFlightHours: (maxFlightHours) => set({ maxFlightHours }),
   setUseHeartbeatBoost: (useHeartbeatBoost: boolean) => set({ useHeartbeatBoost }),
   setPriorityPlayers: (priorityPlayers) => set({ priorityPlayers }),
@@ -593,6 +603,7 @@ export const useTripStore = create<TripState>()(
         // startDate/endDate are NOT persisted either — every session starts
         // at the rest-of-season default (Tom 2026-08-19).
         maxDriveMinutes: state.maxDriveMinutes,
+        radiusEnabled: state.radiusEnabled,
         maxFlightHours: state.maxFlightHours,
         useHeartbeatBoost: state.useHeartbeatBoost,
         maxNights: state.maxNights,

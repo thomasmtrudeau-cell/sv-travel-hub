@@ -478,7 +478,9 @@ export default function MapView() {
         <div className="order-2 lg:order-none flex flex-col gap-3 lg:w-[460px] lg:shrink-0">
           {/* Summer coverage gap — only renders if any SV player is in a
               non-live summer league (e.g. PGCBL, NECBL, Northwoods). */}
-          <SummerCoverageNotice />
+          {/* Summer coverage notice hidden 2026-08-25: summer leagues are over and
+              the chip read as noise (Tom). Component kept for next summer. */}
+          {false && <SummerCoverageNotice />}
 
           {/* Trip preview banner — shown when a trip card put itself on the
               map ("Show on map"). Covers fly-ins too via mapFocus, and says

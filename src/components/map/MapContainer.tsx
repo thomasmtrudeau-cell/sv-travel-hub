@@ -207,6 +207,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
   const homeBase = useTripStore((s) => s.homeBase)
   const homeBaseName = useTripStore((s) => s.homeBaseName)
   const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
+  const radiusEnabled = useTripStore((s) => s.radiusEnabled)
   const selectedTripIndex = useTripStore((s) => s.selectedTripIndex)
   const tripPlan = useTripStore((s) => s.tripPlan)
   const mapFocus = useTripStore((s) => s.mapFocus)
@@ -468,17 +469,20 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
       placeOriginAt(pos.lat, pos.lng)
     })
 
-    // Drive radius circle
-    const radiusKm = (maxDriveMinutes / 60) * 95 / 1.2
-    const radiusMeters = radiusKm * 1000
-    radiusCircleRef.current = L.circle([homeBase.lat, homeBase.lng], {
-      radius: radiusMeters,
-      color: '#3b82f6',
-      weight: 2,
-      dashArray: '8,6',
-      fillColor: '#3b82f6',
-      fillOpacity: 0.03,
-    }).addTo(map)
+    // Drive radius circle — hidden when the radius is switched off
+    // (Kent 2026-08-25: see the general location of players, no circle).
+    if (radiusEnabled) {
+      const radiusKm = (maxDriveMinutes / 60) * 95 / 1.2
+      const radiusMeters = radiusKm * 1000
+      radiusCircleRef.current = L.circle([homeBase.lat, homeBase.lng], {
+        radius: radiusMeters,
+        color: '#3b82f6',
+        weight: 2,
+        dashArray: '8,6',
+        fillColor: '#3b82f6',
+        fillOpacity: 0.03,
+      }).addTo(map)
+    }
 
     // Center map on new home base (skip if change came from dragging the marker)
     if (dragOriginRef.current) {
@@ -486,7 +490,7 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
     } else {
       map.setView([homeBase.lat, homeBase.lng], map.getZoom())
     }
-  }, [loaded, homeBase, homeBaseName, maxDriveMinutes])
+  }, [loaded, homeBase, homeBaseName, maxDriveMinutes, radiusEnabled])
 
   // First-load fit: frame the roster's venues once (the star effect above
   // recenters on origin changes after that). Skipped entirely when a saved
@@ -1083,6 +1087,8 @@ export default function MapContainer({ tierMarkers, colorBy, eventMarkers = [], 
 function DriveRadiusChip({ onSetStartingLocation }: { onSetStartingLocation: () => void }) {
   const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
   const setMaxDriveMinutes = useTripStore((s) => s.setMaxDriveMinutes)
+  const radiusEnabled = useTripStore((s) => s.radiusEnabled)
+  const setRadiusEnabled = useTripStore((s) => s.setRadiusEnabled)
   // The radius is measured FROM the origin — no origin, no Drive chip
   // (Tom 2026-08-18). The US-view button stays regardless.
   const homeBase = useTripStore((s) => s.homeBase)
@@ -1126,16 +1132,25 @@ function DriveRadiusChip({ onSetStartingLocation }: { onSetStartingLocation: () 
           className="flex items-center gap-1.5 rounded-md border border-border/80 bg-surface/95 backdrop-blur px-2.5 py-1.5 text-[11px] font-medium text-text shadow-md hover:border-accent-blue/50 transition-colors"
           title="Adjust the dashed drive-radius circle around your starting city"
         >
-          <span className="inline-block h-1.5 w-3 rounded-full border border-dashed border-accent-blue" />
-          Drive: {display}
+          <span className={`inline-block h-1.5 w-3 rounded-full border border-dashed ${radiusEnabled ? 'border-accent-blue' : 'border-text-dim/40'}`} />
+          {radiusEnabled ? `Drive: ${display}` : 'Radius: off'}
           <span className={`text-text-dim/60 text-[9px] transition-transform ${open ? 'rotate-180' : ''}`}>▾</span>
         </button>
       )}
       {homeBase && open && (
         <div className="absolute right-0 top-full mt-1 w-56 rounded-lg border border-border bg-surface p-3 shadow-xl">
-          <label className="block text-[10px] uppercase tracking-wide text-text-dim/60 mb-1.5">
-            Drive radius — {display}
-          </label>
+          <div className="mb-1.5 flex items-center justify-between">
+            <label className="block text-[10px] uppercase tracking-wide text-text-dim/60">
+              Drive radius {radiusEnabled ? `- ${display}` : '- off'}
+            </label>
+            <button
+              onClick={() => setRadiusEnabled(!radiusEnabled)}
+              className={`rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors ${radiusEnabled ? 'text-text-dim/60 hover:text-text hover:bg-gray-800/50' : 'bg-accent-blue/15 text-accent-blue'}`}
+              title={radiusEnabled ? 'Hide the circle and show every game on these dates regardless of distance' : 'Turn the drive radius back on'}
+            >
+              {radiusEnabled ? 'Turn off' : 'Turn on'}
+            </button>
+          </div>
           <input
             type="range"
             min={120}

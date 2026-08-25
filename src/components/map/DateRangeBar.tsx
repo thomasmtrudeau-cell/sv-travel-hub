@@ -18,6 +18,7 @@ export default function DateRangeBar({ filterStart, filterEnd, children }: DateR
   const homeBase = useTripStore((s) => s.homeBase)
   const homeBaseName = useTripStore((s) => s.homeBaseName)
   const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
+  const radiusEnabled = useTripStore((s) => s.radiusEnabled)
 
   const hours = Math.floor(maxDriveMinutes / 60)
   const mins = maxDriveMinutes % 60
@@ -35,7 +36,7 @@ export default function DateRangeBar({ filterStart, filterEnd, children }: DateR
       {homeBase ? (
         <span className="text-xs text-text" title="Trip origin — the star on the map. Distances and the drive radius read from here.">
           from <span className="font-medium">{homeBaseName}</span>
-          <span className="text-text-dim"> · {radiusLabel} radius</span>
+          <span className="text-text-dim"> · {radiusEnabled ? `${radiusLabel} radius` : 'radius off'}</span>
         </span>
       ) : (
         <span className="text-xs text-text-dim/60" title="No trip origin yet, so the map shows every game. Pick an origin in Filters to get the star, drive radius, and distances.">

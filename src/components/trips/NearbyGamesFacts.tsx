@@ -42,6 +42,7 @@ export default function NearbyGamesFacts({
   const homeBase = useTripStore((s) => s.homeBase)
   const homeBaseName = useTripStore((s) => s.homeBaseName)
   const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
+  const radiusEnabled = useTripStore((s) => s.radiusEnabled)
   const priorityPlayers = useTripStore((s) => s.priorityPlayers)
   const proGames = useScheduleStore((s) => s.proGames)
   const ncaaGames = useScheduleStore((s) => s.ncaaGames)
@@ -73,7 +74,9 @@ export default function NearbyGamesFacts({
       seen.add(key)
       const driveMinutes = estimateDriveMinutes(homeBase, g.venue.coords)
       const row = { game: g, players: rosterPlayers, driveMinutes }
-      if (driveMinutes <= maxDriveMinutes) inRangeRows.push(row)
+      // Radius off (Kent 2026-08-25): every game on the dates is a fact,
+      // distance still labeled so the far ones read as far.
+      if (!radiusEnabled || driveMinutes <= maxDriveMinutes) inRangeRows.push(row)
       else beyondRows.push(row)
     }
     const cmp = (a: FactRow, b: FactRow) =>
@@ -83,7 +86,7 @@ export default function NearbyGamesFacts({
     inRangeRows.sort(cmp)
     beyondRows.sort(cmp)
     return { inRange: inRangeRows, beyond: beyondRows }
-  }, [proGames, ncaaGames, hsGames, summerGames, startDate, endDate, homeBase, maxDriveMinutes, playerMap, sortKey])
+  }, [proGames, ncaaGames, hsGames, summerGames, startDate, endDate, homeBase, maxDriveMinutes, radiusEnabled, playerMap, sortKey])
 
   // Facts need a "from where" — until an origin is set there is nothing
   // honest to compute, so ask for the one missing input instead of
@@ -100,9 +103,11 @@ export default function NearbyGamesFacts({
   }
 
   const visible = showAll ? inRange : inRange.slice(0, INITIAL_ROWS)
-  const driveHoursLabel = maxDriveMinutes % 60 > 0
-    ? `${Math.floor(maxDriveMinutes / 60)}h ${maxDriveMinutes % 60}m`
-    : `${Math.floor(maxDriveMinutes / 60)}h`
+  const driveHoursLabel = !radiusEnabled
+    ? 'any distance (radius off)'
+    : maxDriveMinutes % 60 > 0
+      ? `${Math.floor(maxDriveMinutes / 60)}h ${maxDriveMinutes % 60}m`
+      : `${Math.floor(maxDriveMinutes / 60)}h`
 
   function Row({ row }: { row: FactRow }) {
     const { game, players, driveMinutes } = row

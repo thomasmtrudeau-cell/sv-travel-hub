@@ -9,7 +9,7 @@ import { useRosterStore } from '../../store/rosterStore'
 import { useTripStore } from '../../store/tripStore'
 import type { TierMarker } from './hooks/useTierMarkers'
 import { TIER_COLORS } from './hooks/useTierMarkers'
-import PlayerSearchPicker from '../ui/PlayerSearchPicker'
+import PlayerCheckList from '../ui/PlayerCheckList'
 import CityPicker from '../ui/CityPicker'
 import DateRangeCalendar from '../ui/DateRangeCalendar'
 import { STARTING_LOCATIONS } from '../../data/cityPresets'
@@ -172,6 +172,8 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
   const clearHomeBase = useTripStore((s) => s.clearHomeBase)
   const maxDriveMinutes = useTripStore((s) => s.maxDriveMinutes)
   const setMaxDriveMinutes = useTripStore((s) => s.setMaxDriveMinutes)
+  const radiusEnabled = useTripStore((s) => s.radiusEnabled)
+  const setRadiusEnabled = useTripStore((s) => s.setRadiusEnabled)
 
   // Venue typeahead — Kent types "Dayt" hoping for Daytona; the venue is
   // named "Jackie Robinson Ballpark", so raw substring match found nothing.
@@ -285,45 +287,37 @@ export default function MapFilters({ state, setState, markerCount, totalCount, d
               step={30}
               value={maxDriveMinutes}
               onChange={(e) => setMaxDriveMinutes(parseInt(e.target.value))}
-              className="h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-gray-700 accent-accent-blue"
+              className={`h-1.5 flex-1 cursor-pointer appearance-none rounded-full bg-gray-700 accent-accent-blue ${radiusEnabled ? '' : 'opacity-40'}`}
               title="Max drive: pairs drivable double ups anywhere on the map, and draws the dashed circle around your origin when one is set"
             />
-            <span className="w-12 shrink-0 text-right text-[11px] text-text">
+            <span className={`w-12 shrink-0 text-right text-[11px] ${radiusEnabled ? 'text-text' : 'text-text-dim/50 line-through'}`}>
               {maxDriveMinutes % 60 > 0 ? `${Math.floor(maxDriveMinutes / 60)}h ${maxDriveMinutes % 60}m` : `${Math.floor(maxDriveMinutes / 60)}h`}
             </span>
+            {/* Kent 2026-08-25: a way to switch the radius off and just see
+                where everyone is that week. Hides the circle and lifts the
+                planner's in-range gate; double-up pairing keeps the slider value. */}
+            <button
+              onClick={() => setRadiusEnabled(!radiusEnabled)}
+              className={`shrink-0 rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                radiusEnabled ? 'text-text-dim/60 hover:text-text hover:bg-gray-800/50' : 'bg-accent-blue/15 text-accent-blue'
+              }`}
+              title={radiusEnabled ? 'Turn the radius off: no circle, and the Trip Planner lists every game on these dates' : 'Turn the radius back on'}
+            >
+              {radiusEnabled ? 'Off' : 'Radius off'}
+            </button>
           </div>
 
-          {/* Player picker (affirmative selection — Kent's 2026-06-08 ask).
-              Selected players stack as removable chips; the picker stays
-              open for adding more (Tom 2026-08-11). */}
+          {/* Player checklist (Kent 2026-08-25): the old typeahead closed
+              after each pick, so filtering to several players meant many
+              round trips. Now a persistent searchable checklist with All /
+              None per level. Empty selection = everyone shown. */}
           <div className="flex items-start gap-1.5">
             <span className="w-16 shrink-0 pt-1 text-[10px] uppercase tracking-wide text-text-dim/60">Player</span>
-            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-1">
-              {state.selectedPlayers.map((name) => (
-                <span key={name} className="flex items-center gap-1 rounded-lg bg-accent-blue/15 px-2 py-0.5 text-[11px] font-medium text-accent-blue">
-                  {name}
-                  <button
-                    onClick={() => setState({ ...state, selectedPlayers: state.selectedPlayers.filter((n) => n !== name) })}
-                    className="text-accent-blue/60 hover:text-accent-blue"
-                    title={`Remove ${name} from the map filter`}
-                  >
-                    ✕
-                  </button>
-                </span>
-              ))}
-              <PlayerSearchPicker
-                value=""
-                players={players}
-                excludeNames={state.selectedPlayers}
-                placeholder={state.selectedPlayers.length === 0 ? 'Find player...' : '+ Add another...'}
-                onChange={(name) => {
-                  if (name && !state.selectedPlayers.includes(name)) {
-                    setState({ ...state, selectedPlayers: [...state.selectedPlayers, name] })
-                  }
-                }}
-                compact
-              />
-            </div>
+            <PlayerCheckList
+              players={players}
+              selected={state.selectedPlayers}
+              onChange={(selectedPlayers) => setState({ ...state, selectedPlayers })}
+            />
           </div>
 
           {/* Quick toggles */}
