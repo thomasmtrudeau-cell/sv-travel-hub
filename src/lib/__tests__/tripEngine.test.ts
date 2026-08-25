@@ -130,6 +130,12 @@ describe('computeScoreBreakdown — tier weighting', () => {
   })
 })
 
+function daysFromToday(n: number): string {
+  const d = new Date()
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+
 describe('generateTrips — widening the drive radius never loses trips', () => {
   // Regression for 2026-08-17: at a 5h radius the top trip covered 3 priority
   // players; at 8h it vanished, leaving only 2-player trips. Cause: the wider
@@ -150,14 +156,18 @@ describe('generateTrips — widening the drive radius never loses trips', () => 
 
   // Anchor ~3h north of home (Mon), two priority teammates ±0.5° (Tue),
   // and filler games 5-6.5h from home — only reachable at the 8h radius.
+  // Dates are relative to today: the engine clamps the start date to today,
+  // so a fixed 2026-08-24 fixture silently aged out on 2026-08-25.
+  const D1 = daysFromToday(7)
+  const D2 = daysFromToday(8)
   const games: GameEvent[] = [
-    game('a', '2026-08-24', 1, 30.5, 'Anchor Park', 'Anchor Ace'),
-    game('b', '2026-08-25', 2, 31.0, 'North Field', 'Nearby Beta'),
-    game('c', '2026-08-25', 2, 30.0, 'South Field', 'Nearby Carl'),
-    game('f1', '2026-08-25', 2, 33.5, 'Filler Park 1', 'Filler One'),
-    game('f2', '2026-08-25', 2, 34.0, 'Filler Park 2', 'Filler Two'),
-    game('f3', '2026-08-25', 2, 34.5, 'Filler Park 3', 'Filler Three'),
-    game('f4', '2026-08-25', 2, 35.0, 'Filler Park 4', 'Filler Four'),
+    game('a', D1, 1, 30.5, 'Anchor Park', 'Anchor Ace'),
+    game('b', D2, 2, 31.0, 'North Field', 'Nearby Beta'),
+    game('c', D2, 2, 30.0, 'South Field', 'Nearby Carl'),
+    game('f1', D2, 2, 33.5, 'Filler Park 1', 'Filler One'),
+    game('f2', D2, 2, 34.0, 'Filler Park 2', 'Filler Two'),
+    game('f3', D2, 2, 34.5, 'Filler Park 3', 'Filler Three'),
+    game('f4', D2, 2, 35.0, 'Filler Park 4', 'Filler Four'),
   ]
   const players = [
     'Anchor Ace', 'Nearby Beta', 'Nearby Carl',
@@ -179,7 +189,7 @@ describe('generateTrips — widening the drive radius never loses trips', () => 
 
   it('a trip covering all 3 priority players survives the radius expanding 5h → 8h', async () => {
     const run = (maxDriveMinutes: number) =>
-      generateTrips(games, players, '2026-08-24', '2026-08-25', undefined,
+      generateTrips(games, players, D1, D2, undefined,
         maxDriveMinutes, priority, undefined, 4, undefined, HOME)
 
     const at5h = await run(300)
