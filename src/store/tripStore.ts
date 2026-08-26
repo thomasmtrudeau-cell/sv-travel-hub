@@ -86,6 +86,8 @@ interface TripState {
    *  the trip engine keep using maxDriveMinutes — that is a pairing
    *  distance, not a view filter. */
   radiusEnabled: boolean
+  /** Legacy fly-in cap. No UI since 2026-08-26 (driving-radius app);
+   *  fixed at 4h and not persisted. The engine still takes it. */
   maxFlightHours: number
   useHeartbeatBoost: boolean
   priorityPlayers: string[]
@@ -128,7 +130,6 @@ interface TripState {
   setDateRange: (start: string, end: string) => void
   setMaxDriveMinutes: (minutes: number) => void
   setRadiusEnabled: (enabled: boolean) => void
-  setMaxFlightHours: (hours: number) => void
   setPriorityPlayers: (players: string[]) => void
   setHomeBase: (coords: Coordinates, name: string) => void
   clearHomeBase: () => void
@@ -185,7 +186,6 @@ export const useTripStore = create<TripState>()(
   },
   setMaxDriveMinutes: (maxDriveMinutes) => set({ maxDriveMinutes, radiusEnabled: true }),
   setRadiusEnabled: (radiusEnabled) => set({ radiusEnabled }),
-  setMaxFlightHours: (maxFlightHours) => set({ maxFlightHours }),
   setUseHeartbeatBoost: (useHeartbeatBoost: boolean) => set({ useHeartbeatBoost }),
   setPriorityPlayers: (priorityPlayers) => set({ priorityPlayers }),
   pruneRemovedPlayers: () => {
@@ -587,7 +587,6 @@ export const useTripStore = create<TripState>()(
       version: 9,
       migrate: (persisted: any) => ({
         maxDriveMinutes: persisted?.maxDriveMinutes === 180 ? MAX_DRIVE_MINUTES : (persisted?.maxDriveMinutes ?? MAX_DRIVE_MINUTES),
-        maxFlightHours: persisted?.maxFlightHours ?? 4,
         useHeartbeatBoost: persisted?.useHeartbeatBoost ?? false,
         priorityPlayers: persisted?.priorityPlayers ?? [],
         tripStatuses: persisted?.tripStatuses ?? {},
@@ -604,7 +603,6 @@ export const useTripStore = create<TripState>()(
         // at the rest-of-season default (Tom 2026-08-19).
         maxDriveMinutes: state.maxDriveMinutes,
         radiusEnabled: state.radiusEnabled,
-        maxFlightHours: state.maxFlightHours,
         useHeartbeatBoost: state.useHeartbeatBoost,
         maxNights: state.maxNights,
         priorityPlayers: state.priorityPlayers,
@@ -629,7 +627,7 @@ export const useTripStore = create<TripState>()(
         return {
           ...current,
           ...(p ?? {}),
-          maxFlightHours: p?.maxFlightHours ?? 4, // match initial state + migrate default
+          maxFlightHours: 4, // legacy fly-in cap, no longer persisted
           priorityPlayers: p?.priorityPlayers ?? [],
           tripStatuses: p?.tripStatuses ?? {},
           starredTrips: p?.starredTrips ?? {},

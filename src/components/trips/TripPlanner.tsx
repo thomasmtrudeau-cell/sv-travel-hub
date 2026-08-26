@@ -13,6 +13,7 @@ import ConvergenceBanner from './ConvergenceBanner'
 import { findDoubleUps, findClosestApproach } from '../../lib/doubleUps'
 import { findConvergenceWindows, playersWithoutGames } from '../../lib/convergence'
 import type { RosterPlayer } from '../../types/roster'
+import type { FlyInVisit } from '../../types/schedule'
 import { formatDate, formatDriveTime, TIER_DOT_COLORS, TIER_LABELS } from '../../lib/formatters'
 import { groupAndNumberTrips, itemHasPriorityPlayer, itemPlayerNames, type UnifiedTripItem } from './groupAndNumberTrips'
 import { estimateDriveMinutes } from '../../lib/tripEngine'
@@ -430,20 +431,11 @@ export default function TripPlanner() {
     setPriorityPlayers(priorityPlayers.filter((n) => n !== name))
   }
 
-  const flyInLimit = 5
-
-  // Always include fly-ins with priority players, then fill remaining slots up to limit
-  const displayedFlyIns = useMemo(() => {
-    if (!tripPlan) return []
-    const priorityFlyIns = tripPlan.flyInVisits.filter(v =>
-      v.playerNames.some(n => priorityPlayers.includes(n))
-    )
-    const otherFlyIns = tripPlan.flyInVisits.filter(v =>
-      !v.playerNames.some(n => priorityPlayers.includes(n))
-    )
-    const remaining = Math.max(0, flyInLimit - priorityFlyIns.length)
-    return [...priorityFlyIns, ...otherFlyIns.slice(0, remaining)]
-  }, [tripPlan, priorityPlayers, flyInLimit])
+  // Fly-in visits are no longer surfaced in Suggested Trips (Tom/Kent
+  // 2026-08-26): the planner is a driving-radius tool. Single-game "trips"
+  // 2,000 miles from the origin read as broken results. The engine still
+  // computes flyInVisits; we just never display them here.
+  const displayedFlyIns = useMemo((): FlyInVisit[] => [], [])
   const [showOverlaps, setShowOverlaps] = useState(false)
   const proFetchedAt = useScheduleStore((s) => s.proFetchedAt)
 
@@ -888,21 +880,11 @@ export default function TripPlanner() {
 
 
           {/* Zero road trips explanation */}
-          {tripPlan.trips.length === 0 && tripPlan.flyInVisits.length > 0 && (
-            <div className="rounded-lg border border-accent-orange/20 bg-accent-orange/5 px-4 py-3">
-              <p className="text-sm text-accent-orange">
-                No road trips possible — all players with games are beyond the {Math.floor(maxDriveMinutes / 60)}h drive radius from {tripPlan?.baseName || homeBaseName || 'your trip origin'}.
-                See fly-in options below, or increase the max drive time.
-              </p>
-            </div>
-          )}
-
-          {/* Zero everything — no results at all */}
-          {tripPlan.trips.length === 0 && tripPlan.flyInVisits.length === 0 && (
+          {tripPlan.trips.length === 0 && (
             <div className="rounded-xl border border-border/50 bg-surface/50 px-5 py-6 text-center space-y-2">
               <p className="text-sm font-medium text-text">No trip options found for this date range.</p>
               <p className="text-xs text-text-dim">
-                Try extending your end date, increasing the max drive, or checking that schedules are loaded for your players.
+                No games within {Math.floor(maxDriveMinutes / 60)}h of {tripPlan?.baseName || homeBaseName || 'your trip origin'} on these dates. Try extending your end date, widening the drive radius, or moving the trip origin.
               </p>
             </div>
           )}
@@ -910,7 +892,7 @@ export default function TripPlanner() {
           {/* Unified trip list — road trips and fly-ins sorted together.
               Grouping/numbering comes from the SHARED tripGrouping memo so
               "Trip #N" here always matches the banners above. */}
-          {tripGrouping && (tripPlan.trips.length > 0 || tripPlan.flyInVisits.length > 0) && (() => {
+          {tripGrouping && tripPlan.trips.length > 0 && (() => {
             const { unified, groups: numbered } = tripGrouping
             const prioritySet = new Set(priorityPlayers)
 
@@ -1252,46 +1234,12 @@ export default function TripPlanner() {
           {/* Fly-in visits — all options */}
           {/* Fly-ins are now merged into the unified trip list above */}
 
-          {/* Players whose games are far from this trip's area. The old
-              "N players with no games in date range" wall moved off the
-              planner entirely (Tom 2026-07-23) — that's a data-health
-              concern, and its per-player "reasons" read as broken data. */}
-          {(() => {
-            const beyondFlight = tripPlan.unvisitablePlayers.filter((e) => e.reason.startsWith('Beyond max flight'))
-            return (
-              <>
-                {beyondFlight.length > 0 && (
-                  <div id="section-beyond-flight" className="rounded-xl border border-accent-orange/30 bg-accent-orange/5 p-5">
-                    <h3 className="mb-2 text-sm font-semibold text-accent-orange">
-                      Too far from this trip's area ({beyondFlight.length})
-                    </h3>
-                    <p className="mb-3 text-xs text-text-dim">
-                      These players have games, but nowhere near this trip's area. Plan a separate trip around them (set them as priority players and regenerate).
-                    </p>
-                    <div className="space-y-1.5">
-                      {beyondFlight.map((entry) => {
-                        const player = playerMap.get(entry.name)
-                        const tier = player?.tier ?? 4
-                        const dotColor = TIER_DOT_COLORS[tier] ?? 'bg-gray-500'
-                        return (
-                          <div key={entry.name} className="flex items-center gap-2 text-sm">
-                            <span className={`h-2 w-2 rounded-full ${dotColor}`} />
-                            <span className="font-medium text-accent-orange cursor-pointer hover:underline" onClick={() => setSelectedPlayer(entry.name)}>{entry.name}</span>
-                            <span className="text-xs text-text-dim">{TIER_LABELS[tier] ?? ''}</span>
-                            <span className="text-xs text-text-dim/70">— {entry.reason}</span>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
-              </>
-            )
-          })()}
+          {/* The "Too far from this trip's area" fly-in box was removed
+              2026-08-26: the "N more games beyond your drive" expander in
+              the facts table already covers who is outside the radius. */}
 
         </>
       )}
-
 
       {/* Did you know? — rotating app tips (below results per Kent's flow) */}
       <DidYouKnow />
