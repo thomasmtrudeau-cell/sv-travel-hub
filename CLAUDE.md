@@ -7,6 +7,15 @@ repo's declared role. In short: an SPA mapping client schedules, venues, and
 travel proximity; `src/data/` is its own write-home for hand-maintained
 venue/schedule datasets.
 
+## Stadium Guide × Travel Hub — layered, not converged (D2, BE 2026-09-02)
+
+pq-055 asked whether sv-registry's Stadium Guide (`data/reference/st-complexes`,
+the venues/addresses reference) and this Travel Hub converge or stay separate.
+**Ruled: explicitly layered.** The Guide is the address/venue reference; this
+hub is the map-and-proximity surface over schedules. No code change followed
+the ruling; it is captured here (per the SV Way capture loop) so a future
+session does not re-open it. The read-duty gap below is unaffected by it.
+
 ## Known gap — read duty (marked, not scheduled)
 
 This repo's own `sv-way.config.json` already flags that it names client
